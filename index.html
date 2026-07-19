@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Baby Daily</title>
+
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#F59E23" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="Baby Daily" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+
+<style>
+  :root{
+    --bg:#FFF8E1; --bg2:#FFF1CC; --card:#FFFFFF; --ink:#4A3A1A; --muted:#9A845A;
+    --line:#F0E2BC; --amber:#F59E23; --amberDeep:#E0820A; --amberSoft:#FFEDC7;
+    --green:#3F9E5A; --greenSoft:#E4F3E4; --red:#D6453C; --redSoft:#FBE3E0;
+    --sky:#5AA9D6; --skySoft:#E1F0F8;
+    color-scheme: light;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--bg);
+    background-image:radial-gradient(130% 90% at 50% -10%, #FFF6D6 0%, #FFF8E1 55%);
+    background-attachment:fixed;
+    font-family:'Nunito',system-ui,-apple-system,sans-serif;
+    color:var(--ink); -webkit-font-smoothing:antialiased;
+    padding:env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 72px);
+  }
+  .wrap{max-width:780px;margin:0 auto;padding:clamp(14px,4vw,32px);}
+  h1,h2,h3{font-family:'Fraunces',serif;margin:0;}
+  .title{font-size:clamp(26px,6vw,34px);font-weight:600;}
+  .sub{color:var(--muted);font-size:14px;margin-top:2px;font-weight:600;}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:0 6px 18px -12px rgba(224,130,10,0.35);}
+  .card h2{font-size:19px;margin-bottom:4px;}
+  .card .note{color:var(--muted);font-size:13px;line-height:1.5;margin:2px 0 12px;font-weight:600;}
+
+  .age-hero{background:linear-gradient(135deg,#FFD36B,#F59E23);color:#4A3A1A;border:none;border-radius:20px;padding:22px;margin-bottom:16px;box-shadow:0 10px 26px -12px rgba(224,130,10,0.6);}
+  .age-hero .big{font-family:'Fraunces',serif;font-size:clamp(26px,6vw,32px);font-weight:600;line-height:1.1;}
+  .age-hero .stage{font-size:14px;font-weight:700;margin-top:6px;opacity:0.85;}
+
+  .pill{display:inline-block;background:var(--amberSoft);color:var(--amberDeep);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;margin:0 6px 6px 0;}
+  .row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
+  .row:last-child{border-bottom:none;}
+  .row .k{font-weight:700;font-size:14px;min-width:96px;}
+  .row .v{font-size:14px;color:var(--ink);line-height:1.5;font-weight:600;}
+
+  /* checklist */
+  .check{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;}
+  .check:last-child{border-bottom:none;}
+  .box{width:24px;height:24px;border-radius:8px;border:2px solid var(--amber);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .15s;}
+  .box.on{background:var(--amber);border-color:var(--amber);}
+  .box.on::after{content:"✓";color:#fff;font-weight:800;font-size:15px;}
+  .check .lbl{font-size:15px;font-weight:600;line-height:1.4;}
+  .check.done .lbl{color:var(--muted);text-decoration:line-through;}
+
+  /* red flags */
+  .flag{background:var(--redSoft);border:1px solid #F3C9C4;border-radius:14px;padding:14px 16px;}
+  .flag h2{color:var(--red);}
+  .flag ul{margin:8px 0 0;padding-left:20px;}
+  .flag li{font-size:14px;line-height:1.6;margin-bottom:6px;font-weight:700;color:#8A2820;}
+  .emerg{background:var(--red);color:#fff;border-radius:12px;padding:12px 14px;font-size:14px;font-weight:700;margin-top:12px;line-height:1.5;}
+
+  /* trackers */
+  .track-btns{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-bottom:12px;}
+  .tbtn{border:none;border-radius:12px;padding:12px 8px;font-size:14px;font-weight:800;font-family:inherit;cursor:pointer;color:#4A3A1A;}
+  .tbtn.feed{background:#FFE1A8;} .tbtn.wet{background:#D7ECF7;} .tbtn.dirty{background:#E6DAC0;} .tbtn.sleep{background:#E2D6F2;}
+  .log{max-height:220px;overflow:auto;}
+  .logrow{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;font-weight:600;}
+  .logrow .del{color:var(--muted);font-size:12px;cursor:pointer;padding:2px 8px;border:1px solid var(--line);border-radius:6px;font-weight:700;}
+  .counts{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;}
+  .cbadge{font-size:13px;font-weight:800;color:var(--amberDeep);background:var(--amberSoft);border-radius:10px;padding:6px 10px;}
+
+  /* tabs */
+  .tabs{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex;justify-content:space-around;padding:8px 4px calc(8px + env(safe-area-inset-bottom));z-index:20;}
+  .tab{flex:1;text-align:center;font-size:11px;font-weight:800;color:var(--muted);background:none;border:none;padding:6px 2px;cursor:pointer;font-family:inherit;}
+  .tab.active{color:var(--amberDeep);}
+  .tab .ic{font-size:20px;display:block;margin-bottom:2px;}
+
+  .btn{border:none;border-radius:12px;padding:12px 18px;font-size:15px;font-weight:800;font-family:inherit;cursor:pointer;}
+  .btn-primary{background:var(--amber);color:#fff;box-shadow:0 6px 16px -8px var(--amberDeep);}
+  .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--line);}
+  input[type=date],input[type=text]{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:16px;font-family:inherit;color:var(--ink);font-weight:600;}
+  label{font-size:14px;font-weight:700;display:block;margin-bottom:6px;}
+
+  .disc{margin-top:18px;color:var(--muted);font-size:12px;line-height:1.6;border-top:1px solid var(--line);padding-top:14px;font-weight:600;}
+  #boot{padding:40px 24px;color:var(--muted);font-weight:700;}
+  .hide{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap"><div id="app"><div id="boot">Loading…</div></div></div>
+<div class="tabs" id="tabs"></div>
+
+<script>
+(function(){
+  "use strict";
+  var K_BIRTH="baby_birth_v1", K_CHECK="baby_check_v1", K_LOG="baby_log_v1";
+
+  function get(k){ try{return localStorage.getItem(k);}catch(e){return null;} }
+  function set(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
+  function getJSON(k,f){ try{var s=localStorage.getItem(k);return s?JSON.parse(s):f;}catch(e){return f;} }
+  function setJSON(k,v){ set(k,JSON.stringify(v)); }
+
+  function todayKey(){ var d=new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+  function ageDays(birth){ var b=new Date(birth); var now=new Date(); b.setHours(0,0,0,0); var t=new Date(); t.setHours(0,0,0,0); return Math.floor((t-b)/86400000); }
+  function ageText(days){
+    if(days<0) return "not born yet";
+    if(days===0) return "born today 🎉";
+    var w=Math.floor(days/7), d=days%7;
+    if(days<7) return days+(days===1?" day old":" days old");
+    if(days<70){ var s=w+(w===1?" week":" weeks"); if(d) s+=", "+d+(d===1?" day":" days"); return s+" old"; }
+    var m=Math.floor(days/30.44); return m+(m===1?" month":" months")+" old";
+  }
+
+  // ---------- age-based guidance ----------
+  function stageOf(days){
+    if(days<7) return "week1";
+    if(days<28) return "weeks2to4";
+    if(days<56) return "weeks5to8";
+    if(days<84) return "weeks9to12";
+    return "months3plus";
+  }
+  function guidance(days){
+    var st=stageOf(days);
+    var feed = days<28
+      ? "Every 2–3 hours, 8–12 times a day, day and night. Follow hunger cues; wake to feed if 3+ hrs have passed in the day."
+      : "Roughly every 2.5–3.5 hours, ~7–9 feeds a day. Longer night stretches may start to appear.";
+    var wake = days<28
+      ? "35–60 minutes awake between sleeps — very short. Watch for sleepy cues and settle early."
+      : days<84
+        ? "60–90 minutes awake between sleeps."
+        : "About 75–120 minutes awake between sleeps.";
+    var sleep = days<84
+      ? "14–17 hrs total across the day in short bursts. No fixed schedule yet — that comes around 3–4 months."
+      : "14–16 hrs total; day/night rhythm starts becoming clearer.";
+    var nappies = days<7
+      ? "Wet: builds from 1 on day 1 to 6+ by day 6. Dirty: stools change from black (meconium) → green → yellow & seedy."
+      : "6+ wet nappies a day, and regular soft yellow stools (breastfed babies can vary a lot — that's normal).";
+    var focus = {
+      week1: ["Umbilical cord: keep clean & dry, fold nappy below it", "Feed on demand, wake to feed if sleepy", "Back to sleep, firm flat surface, nothing in the cot", "Track wet/dirty nappies to confirm feeding is working", "First pediatrician visit is usually 3–5 days old"],
+      weeks2to4: ["Baby should be back to birth weight by ~2 weeks", "Cord stump usually falls off 1–3 weeks", "Tummy time: a few minutes, a few times a day, while awake & watched", "Day/night confusion is normal now"],
+      weeks5to8: ["First real smiles may appear ✨", "Longer alert periods — gentle play, talking, contrast pictures", "2-month check-up & first vaccines usually due", "Cluster feeding & evening fussiness can peak"],
+      weeks9to12: ["More cooing and 'talking' back", "Starting to hold head steadier during tummy time", "Naps may start consolidating a little"],
+      months3plus: ["Clearer day/night rhythm forming", "Rolling may start — never leave on a raised surface", "More interactive: laughing, reaching for things"]
+    };
+    return {feed:feed,wake:wake,sleep:sleep,nappies:nappies,focus:focus[st]};
+  }
+
+  function dailyChecklist(days){
+    var base=[
+      "Feeds on track (8–12/day if under 4 wks, ~7–9 after)",
+      "Counted wet nappies (aiming 6+)",
+      "At least one dirty nappy today (or noted if not)",
+      "Back to sleep every sleep, cot clear",
+      "Tummy time while awake & supervised",
+      "Cuddles / skin-to-skin / talking time",
+      "Check baby's temperature feels normal (not hot/cold)",
+      "You ate, drank water, and rested when you could 💛"
+    ];
+    if(days<21) base.splice(4,0,"Umbilical cord clean & dry");
+    return base;
+  }
+
+  var RED_FLAGS=[
+    "Fever 100.4°F / 38°C or higher (under 3 months = emergency)",
+    "Trouble breathing — fast, grunting, flaring nostrils, ribs pulling in, or blue/grey lips",
+    "Very hard to wake, floppy, or won't respond",
+    "Fewer than 6 wet nappies a day, no tears, dry mouth, or sunken soft spot",
+    "Won't feed, or repeatedly falls asleep before finishing",
+    "Forceful/projectile vomiting, or green vomit",
+    "A rash that doesn't fade when you press a glass on it",
+    "Bulging or sunken soft spot (fontanelle)",
+    "Yellowing skin/eyes that's spreading or getting deeper (jaundice)",
+    "Any time your gut says something is wrong"
+  ];
+
+  // ---------- views ----------
+  var app=document.getElementById("app");
+  var TAB="today";
+
+  function needsBirth(){ return !get(K_BIRTH); }
+
+  function renderSetup(){
+    app.innerHTML="";
+    var c=document.createElement("div"); c.className="card";
+    c.innerHTML='<h1 class="title">Welcome 💛</h1>'+
+      '<p class="note">This little app is your daily newborn companion — schedules, checklists, trackers, milestones, and a when-to-call-the-doctor guide, all tuned to your baby\'s age.</p>'+
+      '<label for="bd">Your baby\'s date of birth</label>';
+    var inp=document.createElement("input"); inp.type="date"; inp.id="bd"; inp.max=new Date().toISOString().slice(0,10);
+    c.appendChild(inp);
+    var btn=document.createElement("button"); btn.className="btn btn-primary"; btn.style.marginTop="14px"; btn.textContent="Start";
+    btn.onclick=function(){ if(!inp.value){ inp.focus(); return; } set(K_BIRTH,inp.value); TAB="today"; renderTabs(); render(); };
+    c.appendChild(btn);
+    app.appendChild(c);
+
+    var d=document.createElement("div"); d.className="disc";
+    d.textContent="This app shares general newborn-care information and is not medical advice, diagnosis, or a substitute for your pediatrician. For anything about your baby's health, or if you're ever worried, contact your doctor or emergency services.";
+    app.appendChild(d);
+  }
+
+  function ageHero(){
+    var birth=get(K_BIRTH); var days=ageDays(birth);
+    var h=document.createElement("div"); h.className="age-hero";
+    var g=guidance(days);
+    h.innerHTML='<div class="stage">TODAY · '+new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+'</div>'+
+      '<div class="big">Baby is '+ageText(days)+'</div>';
+    return {el:h,days:days,g:g};
+  }
+
+  function renderToday(){
+    app.innerHTML="";
+    var hero=ageHero(); app.appendChild(hero.el);
+    var days=hero.days, g=hero.g;
+
+    // today's focus
+    var f=document.createElement("div"); f.className="card";
+    f.innerHTML='<h2>What to focus on now</h2><p class="note">Key things for your baby\'s current stage.</p>';
+    g.focus.forEach(function(item){ var p=document.createElement("div"); p.className="check"; p.style.cursor="default";
+      p.innerHTML='<div class="box on" style="cursor:default"></div><div class="lbl" style="font-weight:700">'+item+'</div>'; f.appendChild(p); });
+    app.appendChild(f);
+
+    // daily checklist (persisted per day)
+    var cl=document.createElement("div"); cl.className="card";
+    cl.innerHTML='<h2>Daily checklist</h2><p class="note">Resets each day. Tap to tick off.</p>';
+    var items=dailyChecklist(days);
+    var store=getJSON(K_CHECK,{}); var tkey=todayKey(); var done=store[tkey]||{};
+    items.forEach(function(item,idx){
+      var r=document.createElement("div"); r.className="check"+(done[idx]?" done":"");
+      var bx=document.createElement("div"); bx.className="box"+(done[idx]?" on":"");
+      var lb=document.createElement("div"); lb.className="lbl"; lb.textContent=item;
+      r.appendChild(bx); r.appendChild(lb);
+      r.onclick=function(){ done[idx]=!done[idx]; store[tkey]=done; setJSON(K_CHECK,store);
+        r.className="check"+(done[idx]?" done":""); bx.className="box"+(done[idx]?" on":""); };
+      cl.appendChild(r);
+    });
+    app.appendChild(cl);
+    disclaimer();
+  }
+
+  function renderSchedule(){
+    app.innerHTML="";
+    var hero=ageHero(); app.appendChild(hero.el);
+    var g=hero.g;
+    function block(title,note,rows){
+      var c=document.createElement("div"); c.className="card";
+      c.innerHTML='<h2>'+title+'</h2>'+(note?'<p class="note">'+note+'</p>':'');
+      rows.forEach(function(r){ var d=document.createElement("div"); d.className="row";
+        d.innerHTML='<div class="k">'+r[0]+'</div><div class="v">'+r[1]+'</div>'; c.appendChild(d); });
+      app.appendChild(c);
+    }
+    block("Feeding","Combination feeding — breast and bottle both count toward these totals.",[
+      ["How often",g.feed],["Cues","Rooting, hands to mouth, smacking lips, fussing. Crying is a late sign."],
+      ["Combo tip","If topping up with formula after nursing, offer the breast first so supply stays up."]
+    ]);
+    block("Sleep & wake",null,[
+      ["Wake window",g.wake],["Total sleep",g.sleep],
+      ["Safe sleep","On the back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
+    ]);
+    block("Nappies",null,[
+      ["Expect",g.nappies],["Watch","Fewer than 6 wet a day, or very dark strong urine, is worth a call."]
+    ]);
+    disclaimer();
+  }
+
+  function renderTrackers(){
+    app.innerHTML="";
+    var h=document.createElement("div"); h.className="age-hero";
+    h.innerHTML='<div class="stage">TRACKERS · '+new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+'</div><div class="big">Today\'s log</div>';
+    app.appendChild(h);
+
+    var log=getJSON(K_LOG,[]); var tkey=todayKey();
+    var todayLog=log.filter(function(e){return e.day===tkey;});
+
+    // counts
+    var counts={feed:0,wet:0,dirty:0,sleep:0};
+    todayLog.forEach(function(e){ counts[e.type]=(counts[e.type]||0)+1; });
+
+    var c=document.createElement("div"); c.className="card";
+    c.innerHTML='<h2>Quick add</h2><p class="note">One tap logs it with the current time.</p>';
+    var cb=document.createElement("div"); cb.className="counts";
+    cb.innerHTML='<span class="cbadge">🍼 '+counts.feed+' feeds</span><span class="cbadge">💧 '+counts.wet+' wet</span><span class="cbadge">💩 '+counts.dirty+' dirty</span><span class="cbadge">😴 '+counts.sleep+' sleeps</span>';
+    c.appendChild(cb);
+
+    var grid=document.createElement("div"); grid.className="track-btns";
+    [["feed","🍼 Feed"],["wet","💧 Wet"],["dirty","💩 Dirty"],["sleep","😴 Sleep"]].forEach(function(t){
+      var b=document.createElement("button"); b.className="tbtn "+t[0]; b.textContent=t[1];
+      b.onclick=function(){ var now=new Date(); log.push({type:t[0],day:tkey,t:now.getTime(),
+        label:now.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}); setJSON(K_LOG,log); renderTrackers(); };
+      grid.appendChild(b);
+    });
+    c.appendChild(grid);
+    app.appendChild(c);
+
+    var lc=document.createElement("div"); lc.className="card";
+    lc.innerHTML='<h2>Today\'s entries</h2>';
+    if(!todayLog.length){ var e=document.createElement("p"); e.className="note"; e.textContent="Nothing logged yet today. Tap a button above to start."; lc.appendChild(e); }
+    else{
+      var wrap=document.createElement("div"); wrap.className="log";
+      var icons={feed:"🍼 Feed",wet:"💧 Wet nappy",dirty:"💩 Dirty nappy",sleep:"😴 Sleep"};
+      todayLog.slice().reverse().forEach(function(e){
+        var r=document.createElement("div"); r.className="logrow";
+        var left=document.createElement("span"); left.textContent=icons[e.type]+" · "+e.label;
+        var del=document.createElement("span"); del.className="del"; del.textContent="remove";
+        del.onclick=function(){ var i=log.indexOf(e); if(i>=0){log.splice(i,1);setJSON(K_LOG,log);renderTrackers();} };
+        r.appendChild(left); r.appendChild(del); wrap.appendChild(r);
+      });
+      lc.appendChild(wrap);
+    }
+    app.appendChild(lc);
+    disclaimer();
+  }
+
+  function renderMilestones(){
+    app.innerHTML="";
+    var hero=ageHero(); app.appendChild(hero.el);
+    var days=hero.days;
+    var timeline=[
+      ["First days","Sleeps a lot, feeds often, grasps your finger, startles at loud sounds.",0],
+      ["2–4 weeks","Back to birth weight, cord stump falls off, focuses on faces ~20–30cm away.",14],
+      ["6 weeks","First social smiles, more alert, starting to make cooing sounds.",42],
+      ["2 months","Holds head up briefly in tummy time, follows objects, coos & gurgles.",56],
+      ["3 months","Steadier head control, pushes up on arms, laughs, reaches for things.",84],
+      ["4 months","Rolls (watch on raised surfaces!), grabs toys, babbles, very interactive.",120]
+    ];
+    var c=document.createElement("div"); c.className="card";
+    c.innerHTML='<h2>What to expect</h2><p class="note">A rough map — every baby is on their own timeline. These aren\'t deadlines. Your pediatrician tracks real milestones at check-ups.</p>';
+    timeline.forEach(function(m){
+      var reached=days>=m[2];
+      var r=document.createElement("div"); r.className="check"; r.style.cursor="default";
+      r.innerHTML='<div class="box '+(reached?"on":"")+'" style="cursor:default"></div>'+
+        '<div><div class="lbl" style="font-weight:800">'+m[0]+'</div><div class="note" style="margin:2px 0 0">'+m[1]+'</div></div>';
+      c.appendChild(r);
+    });
+    app.appendChild(c);
+    disclaimer();
+  }
+
+  function renderFlags(){
+    app.innerHTML="";
+    var c=document.createElement("div"); c.className="card flag";
+    c.innerHTML='<h2>Call the doctor if…</h2><p class="note" style="color:#8A2820">These are signs to get medical help. When in doubt, always call — you can\'t be too careful with a newborn.</p>';
+    var ul=document.createElement("ul");
+    RED_FLAGS.forEach(function(f){ var li=document.createElement("li"); li.textContent=f; ul.appendChild(li); });
+    c.appendChild(ul);
+    var em=document.createElement("div"); em.className="emerg";
+    em.textContent="A fever of 100.4°F (38°C) or higher in a baby under 3 months is a medical emergency — call your pediatrician or go to the ER straight away. Don't give fever medicine first.";
+    c.appendChild(em);
+    app.appendChild(c);
+
+    var t=document.createElement("div"); t.className="card";
+    t.innerHTML='<h2>Keep handy</h2><p class="note">Save your key numbers in your phone now, so they\'re ready if you ever need them: your pediatrician, the maternity/labour ward, and your local emergency number.</p>';
+    app.appendChild(t);
+    disclaimer();
+  }
+
+  function disclaimer(){
+    var d=document.createElement("div"); d.className="disc";
+    d.textContent="General information only — not medical advice, diagnosis, or a substitute for your pediatrician. Babies vary; these are typical ranges, not rules. For anything about your baby's health, or whenever you're worried, contact your doctor or emergency services.";
+    app.appendChild(d);
+    var reset=document.createElement("div"); reset.style.marginTop="10px";
+    var b=document.createElement("button"); b.className="btn btn-ghost"; b.textContent="Change birth date";
+    b.onclick=function(){ if(confirm("Change your baby's date of birth?")){ localStorage.removeItem(K_BIRTH); render(); } };
+    reset.appendChild(b); app.appendChild(reset);
+  }
+
+  var TABS=[["today","🏠","Today"],["schedule","🕐","Schedule"],["track","📝","Track"],["milestones","⭐","Growth"],["flags","🚨","Doctor"]];
+  function renderTabs(){
+    var t=document.getElementById("tabs"); t.innerHTML="";
+    if(needsBirth()){ t.style.display="none"; return; } t.style.display="flex";
+    TABS.forEach(function(tb){
+      var b=document.createElement("button"); b.className="tab"+(TAB===tb[0]?" active":"");
+      b.innerHTML='<span class="ic">'+tb[1]+'</span>'+tb[2];
+      b.onclick=function(){ TAB=tb[0]; renderTabs(); render(); };
+      t.appendChild(b);
+    });
+  }
+
+  function render(){
+    if(needsBirth()){ renderSetup(); renderTabs(); return; }
+    if(TAB==="today") renderToday();
+    else if(TAB==="schedule") renderSchedule();
+    else if(TAB==="track") renderTrackers();
+    else if(TAB==="milestones") renderMilestones();
+    else if(TAB==="flags") renderFlags();
+    window.scrollTo(0,0);
+  }
+
+  try{ renderTabs(); render(); }
+  catch(err){ document.getElementById("boot").textContent="Something went wrong: "+err.message; }
+})();
+</script>
+</body>
+</html>
