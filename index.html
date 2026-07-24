@@ -96,6 +96,13 @@
   .syncbar.err{background:var(--redSoft);color:#8A2820;}
   .syncbar.off{background:#EFEAE0;color:var(--muted);}
 
+  /* feed amount picker */
+  .ozgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+  .ozbtn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:14px 4px;
+    font-family:'Fraunces',serif;font-size:18px;font-weight:600;color:var(--muted);cursor:pointer;}
+  .ozbtn.whole{background:var(--amberSoft);color:var(--amberDeep);border-color:transparent;font-size:20px;}
+  .ozbtn:active{transform:scale(0.96);}
+
   /* age tracker */
   .agegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;}
   .agecell{background:var(--amberSoft);border-radius:14px;padding:12px 6px;text-align:center;}
@@ -669,7 +676,10 @@
   function ozText(ml){
     if(!ml) return "";
     var oz=toOz(ml);
-    return (oz<10 ? oz.toFixed(1) : Math.round(oz)) + "oz";
+    // Show one decimal whenever there's a fraction, so a tapped 11.5oz never
+    // displays as 11oz. Whole numbers stay clean.
+    var r=Math.round(oz*10)/10;
+    return (r%1===0 ? r.toFixed(0) : r.toFixed(1)) + "oz";
   }
 
   function durText(ms){
@@ -771,14 +781,7 @@
 
     // feed
     var fb=document.createElement("button"); fb.className="tbtn feed"; fb.textContent="🍼 Feed";
-    fb.onclick=function(){
-      var v=prompt("How much did "+baby()+" take? (fl oz)\n\nLeave blank if breastfed or you'd rather not record it.","");
-      if(v===null) return;
-      v=v.trim().replace(/[^0-9.]/g,"");
-      var extra={type:"feed"};
-      if(v!==""){ var n=parseFloat(v); if(!isNaN(n)&&n>0&&n<40) extra.ml=Math.round(n*ML_PER_OZ); }
-      addEntry(extra);
-    };
+    fb.onclick=function(){ askFeed(function(ml){ addEntry(ml?{type:"feed",ml:ml}:{type:"feed"}); }); };
     grid.appendChild(fb);
 
     // wet
@@ -845,6 +848,59 @@
     }
     app.appendChild(lc);
     disclaimer();
+  }
+
+  // Tappable amount picker — easier one-handed at 3am than typing a number.
+  function askFeed(done){
+    app.innerHTML="";
+    var c=document.createElement("div"); c.className="card";
+    c.innerHTML='<h2>How much?</h2><p class="note">Tap the amount '+baby()+' took. Half ounces are on the second row of each pair.</p>';
+
+    var grid=document.createElement("div"); grid.className="ozgrid";
+    for(var i=1;i<=32;i++){
+      var oz=i/2;                       // 0.5 -> 16 in half-ounce steps
+      (function(oz){
+        var b=document.createElement("button"); b.className="ozbtn"+(oz%1===0?" whole":"");
+        b.textContent=(oz%1===0?oz:oz.toFixed(1));
+        b.onclick=function(){ done(Math.round(oz*ML_PER_OZ)); };
+        grid.appendChild(b);
+      })(oz);
+    }
+    c.appendChild(grid);
+
+    var unit=document.createElement("p"); unit.className="note"; unit.style.textAlign="center"; unit.style.marginTop="10px";
+    unit.textContent="fl oz";
+    c.appendChild(unit);
+
+    var row=document.createElement("div");
+    row.style.display="flex"; row.style.gap="8px"; row.style.marginTop="14px"; row.style.flexWrap="wrap";
+
+    var skip=document.createElement("button"); skip.className="btn btn-primary"; skip.style.flex="1";
+    skip.textContent="Breastfed / don't record";
+    skip.onclick=function(){ done(null); };
+    row.appendChild(skip);
+
+    var other=document.createElement("button"); other.className="btn btn-ghost";
+    other.textContent="Other amount";
+    other.onclick=function(){
+      var v=prompt("Amount in fl oz","");
+      if(v===null) return;
+      v=String(v).trim().replace(/[^0-9.]/g,"");
+      if(v===""){ done(null); return; }
+      var n=parseFloat(v);
+      if(isNaN(n)||n<=0||n>=40){ alert("That doesn't look right — nothing saved."); renderTrackers(); return; }
+      done(Math.round(n*ML_PER_OZ));
+    };
+    row.appendChild(other);
+
+    var cancel=document.createElement("button"); cancel.className="btn btn-ghost";
+    cancel.textContent="Cancel";
+    cancel.onclick=function(){ renderTrackers(); };
+    row.appendChild(cancel);
+
+    c.appendChild(row);
+    app.appendChild(c);
+    window.scrollTo(0,0);
   }
 
   // colour picker for dirty nappies
