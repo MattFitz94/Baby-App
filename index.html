@@ -96,6 +96,8 @@
   .syncbar.err{background:var(--redSoft);color:#8A2820;}
   .syncbar.off{background:#EFEAE0;color:var(--muted);}
 
+  .swatch{width:34px;height:34px;border-radius:10px;flex-shrink:0;border:1px solid rgba(0,0,0,0.15);}
+
   /* history */
   .ranges{display:flex;gap:8px;margin-bottom:12px;}
   .range{flex:1;border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 4px;font-size:13px;font-weight:800;font-family:inherit;color:var(--muted);cursor:pointer;}
@@ -138,6 +140,12 @@
 
   function uid(){
     return Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
+  }
+
+  // Format from the stored timestamp rather than the saved label, so entries
+  // logged before this change display in 12-hour time too.
+  function clock(ms){
+    return new Date(ms).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",hour12:true});
   }
 
   // ---------- sync ----------
@@ -211,12 +219,26 @@
         if(!r.ok) throw new Error("Sync failed");
         return r.json();
       }).then(function(remote){
-        // anything logged locally while offline still needs to go up
+        // anything logged locally while offline still needs to go up,
+        // including a nap this phone ended while the server still has it open
         var local=localState();
-        var ids={}; (remote.events||[]).forEach(function(e){ids[e.id]=1;});
-        var unsent=(local.events||[]).filter(function(e){return !ids[e.id];});
+        var rmap={}; (remote.events||[]).forEach(function(e){rmap[e.id]=e;});
+        var unsent=(local.events||[]).filter(function(e){
+          var r=rmap[e.id];
+          if(!r) return true;
+          return !!(e.end && !r.end);
+        });
         saveState(remote);
-        if(unsent.length){ push(cb); return; }
+        if(unsent.length){
+          // merge the unsent local versions back in before pushing
+          var merged=(remote.events||[]).slice();
+          var mmap={}; merged.forEach(function(e,i){mmap[e.id]=i;});
+          unsent.forEach(function(e){
+            if(mmap[e.id]!==undefined) merged[mmap[e.id]]=e; else merged.push(e);
+          });
+          setJSON(K_LOG,merged);
+          push(cb); return;
+        }
         SYNC.state="ok"; SYNC.msg=""; paintSync(); if(cb)cb();
       }).catch(function(e){
         SYNC.state="err"; SYNC.msg=e.message; paintSync(); if(cb)cb();
@@ -279,6 +301,7 @@
       "Feeds on track (8–12/day if under 4 wks, ~7–9 after)",
       "Counted wet nappies (aiming 6+)",
       "At least one dirty nappy today (or noted if not)",
+      "Opened formula carton in date (24 hrs in the fridge, then bin it)",
       "Back to sleep every sleep, cot clear",
       "Tummy time while awake & supervised",
       "Cuddles / skin-to-skin / talking time",
@@ -403,6 +426,15 @@
       ["How often",g.feed],["Cues","Rooting, hands to mouth, smacking lips, fussing. Crying is a late sign."],
       ["Combo tip","If topping up with formula after nursing, offer the breast first so supply stays up."]
     ]);
+    block("Formula — ready to feed","Kendamil ready-to-feed. It's sterile in the sealed carton, so no making up or cooling needed — but once it's open the clock starts.",[
+      ["Before opening","Store the carton at room temperature. Shake well. No need to boil water or sterilise anything for the liquid itself — bottles and teats still need sterilising."],
+      ["Once opened","Cover and refrigerate. Use within 24 hours, then bin whatever's left."],
+      ["Warming","Stand the bottle in warm water. Never microwave — it heats unevenly and can scald. Body temperature is plenty; cold from the fridge is also fine if baby takes it."],
+      ["Out of the fridge","Once warmed or poured, use within 2 hours. If it's been sitting out longer than that, throw it away."],
+      ["After a feed","Discard anything left in the bottle within 1 hour — saliva gets in and bacteria grow. Don't save it for later."],
+      ["How much","Follow your baby's cues rather than a number: offer, let them stop when they're done, and don't push the last bit. Your health visitor or pediatrician will tell you the right volumes for your baby's weight and how it splits with breastfeeding — that's worth asking at your next check."],
+      ["Kendamil note","It's a whole-milk formula, so it looks and smells creamier than many others. Stools may change colour or consistency when starting or switching — usually normal, but mention it if you're unsure."]
+    ]);
     block("Sleep & wake",null,[
       ["Wake window",g.wake],["Total sleep",g.sleep],
       ["Safe sleep","On the back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
@@ -411,6 +443,58 @@
       ["Expect",g.nappies],["Watch","Fewer than 6 wet a day, or very dark strong urine, is worth a call."]
     ]);
     disclaimer();
+  }
+
+  // Volumes are entered and shown in fl oz but stored in ml, so the numbers
+  // stay exact if the unit ever changes and totals never drift on rounding.
+  var ML_PER_OZ=29.5735;
+  function toOz(ml){ return ml/ML_PER_OZ; }
+  function ozText(ml){
+    if(!ml) return "";
+    var oz=toOz(ml);
+    return (oz<10 ? oz.toFixed(1) : Math.round(oz)) + "oz";
+  }
+
+  function durText(ms){
+    if(ms==null) return "";
+    var mins=Math.round(ms/60000);
+    if(mins<1) return "under a minute";
+    if(mins<60) return mins+"m";
+    var h=Math.floor(mins/60), m=mins%60;
+    return h+"h"+(m?" "+m+"m":"");
+  }
+
+  var POO_COLOURS=[
+    ["black","Black / dark green","#2E2A26","Meconium — normal in the first few days."],
+    ["green","Green","#4E7A3A","Common, especially early on or with formula. Usually fine."],
+    ["yellow","Yellow / seedy","#E0A828","The typical milk-fed colour. Nothing to do."],
+    ["brown","Brown / tan","#8A6234","Normal, more common with formula."],
+    ["orange","Orange","#D2762A","Usually normal."],
+    ["red","Red / blood","#C0392B","Call your doctor."],
+    ["white","White / chalky / pale","#E8E4DA","Call your doctor."]
+  ];
+  function pooInfo(key){
+    for(var i=0;i<POO_COLOURS.length;i++){ if(POO_COLOURS[i][0]===key) return POO_COLOURS[i]; }
+    return null;
+  }
+  // Only these two need acting on; the rest are variations of normal.
+  function pooConcerning(key){ return key==="red"||key==="white"; }
+
+  // The last completed sleep before a given moment, used for wake windows.
+  function awakeSince(log, before){
+    var best=null;
+    log.forEach(function(e){
+      if(e.type!=="sleep") return;
+      var end=e.end||null;
+      if(end==null||end>before) return;
+      if(!best||end>best) best=end;
+    });
+    return best;
+  }
+
+  function openSleep(log){
+    for(var i=log.length-1;i>=0;i--){ if(log[i].type==="sleep"&&!log[i].end) return log[i]; }
+    return null;
   }
 
   function renderTrackers(){
@@ -424,37 +508,116 @@
 
     var log=getJSON(K_LOG,[]); var tkey=todayKey();
     var todayLog=log.filter(function(e){return e.day===tkey;});
+    var napping=openSleep(log);
 
     // counts
     var counts={feed:0,wet:0,dirty:0,sleep:0};
     todayLog.forEach(function(e){ counts[e.type]=(counts[e.type]||0)+1; });
+    var mlToday=0, sleepMs=0;
+    todayLog.forEach(function(e){
+      if(e.ml) mlToday+=e.ml;
+      if(e.type==="sleep"&&e.end) sleepMs+=(e.end-e.t);
+    });
+
+    // live wake window
+    if(!napping){
+      var since=awakeSince(log, Date.now());
+      if(since){
+        var wb=document.createElement("div"); wb.className="syncbar";
+        wb.textContent="⏱️ Awake "+durText(Date.now()-since)+" — last woke at "+clock(since);
+        app.appendChild(wb);
+      }
+    } else {
+      var nb=document.createElement("div"); nb.className="syncbar ok";
+      nb.textContent="😴 Asleep "+durText(Date.now()-napping.t)+" — went down at "+clock(napping.t);
+      app.appendChild(nb);
+    }
 
     var c=document.createElement("div"); c.className="card";
     c.innerHTML='<h2>Quick add</h2><p class="note">One tap logs it with the current time.</p>';
     var cb=document.createElement("div"); cb.className="counts";
-    cb.innerHTML='<span class="cbadge">🍼 '+counts.feed+' feeds</span><span class="cbadge">💧 '+counts.wet+' wet</span><span class="cbadge">💩 '+counts.dirty+' dirty</span><span class="cbadge">😴 '+counts.sleep+' sleeps</span>';
+    cb.innerHTML='<span class="cbadge">🍼 '+counts.feed+' feeds</span>'+
+      (mlToday?'<span class="cbadge">🥛 '+ozText(mlToday)+'</span>':'')+
+      '<span class="cbadge">💧 '+counts.wet+' wet</span><span class="cbadge">💩 '+counts.dirty+' dirty</span>'+
+      '<span class="cbadge">😴 '+counts.sleep+' sleeps'+(sleepMs?' · '+durText(sleepMs):'')+'</span>';
     c.appendChild(cb);
 
+    function addEntry(extra){
+      var now=new Date();
+      var entry={id:uid(),day:tkey,t:now.getTime(),label:clock(now.getTime())};
+      for(var k in extra){ if(extra.hasOwnProperty(k)) entry[k]=extra[k]; }
+      log.push(entry); setJSON(K_LOG,log);
+      renderTrackers(); push();
+    }
+
     var grid=document.createElement("div"); grid.className="track-btns";
-    [["feed","🍼 Feed"],["wet","💧 Wet"],["dirty","💩 Dirty"],["sleep","😴 Sleep"]].forEach(function(t){
-      var b=document.createElement("button"); b.className="tbtn "+t[0]; b.textContent=t[1];
-      b.onclick=function(){ var now=new Date(); log.push({id:uid(),type:t[0],day:tkey,t:now.getTime(),
-        label:now.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}); setJSON(K_LOG,log);
-        renderTrackers(); push(); };
-      grid.appendChild(b);
-    });
+
+    // feed
+    var fb=document.createElement("button"); fb.className="tbtn feed"; fb.textContent="🍼 Feed";
+    fb.onclick=function(){
+      var v=prompt("How much did baby take? (fl oz)\n\nLeave blank if breastfed or you'd rather not record it.","");
+      if(v===null) return;
+      v=v.trim().replace(/[^0-9.]/g,"");
+      var extra={type:"feed"};
+      if(v!==""){ var n=parseFloat(v); if(!isNaN(n)&&n>0&&n<40) extra.ml=Math.round(n*ML_PER_OZ); }
+      addEntry(extra);
+    };
+    grid.appendChild(fb);
+
+    // wet
+    var wb2=document.createElement("button"); wb2.className="tbtn wet"; wb2.textContent="💧 Wet";
+    wb2.onclick=function(){ addEntry({type:"wet"}); };
+    grid.appendChild(wb2);
+
+    // dirty - asks colour
+    var db=document.createElement("button"); db.className="tbtn dirty"; db.textContent="💩 Dirty";
+    db.onclick=function(){ askPoo(function(colour){ addEntry(colour?{type:"dirty",colour:colour}:{type:"dirty"}); }); };
+    grid.appendChild(db);
+
+    // sleep - start or end
+    var slb=document.createElement("button"); slb.className="tbtn sleep";
+    slb.textContent = napping ? "☀️ Woke up" : "😴 Asleep";
+    slb.onclick=function(){
+      if(napping){
+        napping.end=Date.now();
+        // a nap that crosses midnight still belongs to the day it started
+        setJSON(K_LOG,log); renderTrackers(); push();
+      } else {
+        addEntry({type:"sleep"});
+      }
+    };
+    grid.appendChild(slb);
+
     c.appendChild(grid);
     app.appendChild(c);
 
     var lc=document.createElement("div"); lc.className="card";
-    lc.innerHTML='<h2>Today\'s entries</h2>';
-    if(!todayLog.length){ var e=document.createElement("p"); e.className="note"; e.textContent="Nothing logged yet today. Tap a button above to start."; lc.appendChild(e); }
+    lc.innerHTML='<h2>Today\'s entries</h2><p class="note">Each row shows how long baby had been awake beforehand.</p>';
+    if(!todayLog.length){ var e0=document.createElement("p"); e0.className="note"; e0.textContent="Nothing logged yet today. Tap a button above to start."; lc.appendChild(e0); }
     else{
       var wrap=document.createElement("div"); wrap.className="log";
       var icons={feed:"🍼 Feed",wet:"💧 Wet nappy",dirty:"💩 Dirty nappy",sleep:"😴 Sleep"};
-      todayLog.slice().reverse().forEach(function(e){
+      todayLog.slice().sort(function(a,b){return b.t-a.t;}).forEach(function(e){
         var r=document.createElement("div"); r.className="logrow";
-        var left=document.createElement("span"); left.textContent=icons[e.type]+" · "+e.label;
+        var left=document.createElement("div");
+
+        var main=icons[e.type]+" · "+(e.t?clock(e.t):e.label);
+        if(e.ml) main+="  ·  "+ozText(e.ml);
+        if(e.type==="sleep"){
+          main += e.end ? "  →  "+clock(e.end)+"  ·  "+durText(e.end-e.t) : "  ·  still asleep";
+        }
+
+        var bits=[];
+        if(e.colour){
+          var pi=pooInfo(e.colour);
+          if(pi) bits.push(pi[1]);
+        }
+        var woke=awakeSince(log, e.t);
+        if(woke && e.t>woke) bits.push("awake "+durText(e.t-woke));
+
+        left.innerHTML='<div>'+main+'</div>'+
+          (bits.length?'<div class="hsub">'+bits.join(" · ")+'</div>':'');
+
         var del=document.createElement("span"); del.className="del"; del.textContent="remove";
         del.onclick=function(){ var i=log.indexOf(e); if(i>=0){ log.splice(i,1); setJSON(K_LOG,log);
           var d=getJSON(K_DEL,[]); if(e.id){ d.push(e.id); setJSON(K_DEL,d); }
@@ -465,6 +628,37 @@
     }
     app.appendChild(lc);
     disclaimer();
+  }
+
+  // colour picker for dirty nappies
+  function askPoo(done){
+    app.innerHTML="";
+    var c=document.createElement("div"); c.className="card";
+    c.innerHTML='<h2>What colour?</h2><p class="note">Tap the closest match. Colours vary a lot and most are normal — this is just to keep an eye on the pattern.</p>';
+    POO_COLOURS.forEach(function(p){
+      var r=document.createElement("div"); r.className="check";
+      var sw=document.createElement("div"); sw.className="swatch"; sw.style.background=p[2];
+      var tx=document.createElement("div");
+      tx.innerHTML='<div class="lbl" style="font-weight:800">'+p[1]+'</div><div class="hsub">'+p[3]+'</div>';
+      r.appendChild(sw); r.appendChild(tx);
+      r.onclick=function(){
+        if(pooConcerning(p[0])){
+          alert(p[1]+" stools should be checked by a doctor — please call your pediatrician.\n\nIt will still be logged so you have a record.");
+        }
+        done(p[0]);
+      };
+      c.appendChild(r);
+    });
+    var skip=document.createElement("button"); skip.className="btn btn-ghost"; skip.style.marginTop="12px";
+    skip.textContent="Skip — just log it";
+    skip.onclick=function(){ done(null); };
+    c.appendChild(skip);
+    var cancel=document.createElement("button"); cancel.className="btn btn-ghost"; cancel.style.marginTop="12px"; cancel.style.marginLeft="8px";
+    cancel.textContent="Cancel";
+    cancel.onclick=function(){ renderTrackers(); };
+    c.appendChild(cancel);
+    app.appendChild(c);
+    window.scrollTo(0,0);
   }
 
   var RANGE=7;
@@ -486,8 +680,14 @@
 
     var byDay={};
     log.forEach(function(e){
-      if(!byDay[e.day]) byDay[e.day]={feed:0,wet:0,dirty:0,sleep:0};
+      if(!byDay[e.day]) byDay[e.day]={feed:0,wet:0,dirty:0,sleep:0,ml:0,sleepMs:0,longest:0};
       if(byDay[e.day][e.type]!==undefined) byDay[e.day][e.type]++;
+      if(e.ml) byDay[e.day].ml+=e.ml;
+      if(e.type==="sleep"&&e.end){
+        var d=e.end-e.t;
+        byDay[e.day].sleepMs+=d;
+        if(d>byDay[e.day].longest) byDay[e.day].longest=d;
+      }
     });
 
     // range buttons
@@ -501,18 +701,28 @@
     app.appendChild(rc);
 
     // averages
-    var tot={feed:0,wet:0,dirty:0,sleep:0}, activeDays=0;
+    var tot={feed:0,wet:0,dirty:0,sleep:0,ml:0,sleepMs:0}, activeDays=0, mlDays=0, sleepDays=0, longest=0;
     days.forEach(function(k){
       var c=byDay[k]; if(!c) return;
       if(c.feed||c.wet||c.dirty||c.sleep) activeDays++;
+      if(c.ml) mlDays++;
+      if(c.sleepMs) sleepDays++;
+      if(c.longest>longest) longest=c.longest;
       tot.feed+=c.feed; tot.wet+=c.wet; tot.dirty+=c.dirty; tot.sleep+=c.sleep;
+      tot.ml+=(c.ml||0); tot.sleepMs+=(c.sleepMs||0);
     });
     function avg(n){ return activeDays? (n/activeDays).toFixed(1) : "—"; }
 
     var sc=document.createElement("div"); sc.className="card";
     sc.innerHTML='<h2>Daily average</h2><p class="note">Across the '+activeDays+' day'+(activeDays===1?"":"s")+' with anything logged in this range.</p>';
-    [["🍼 Feeds a day",avg(tot.feed)],["💧 Wet nappies a day",avg(tot.wet)],
-     ["💩 Dirty nappies a day",avg(tot.dirty)],["😴 Sleeps logged a day",avg(tot.sleep)]].forEach(function(r){
+    var stats=[["🍼 Feeds a day",avg(tot.feed)],["💧 Wet nappies a day",avg(tot.wet)],
+     ["💩 Dirty nappies a day",avg(tot.dirty)],["😴 Sleeps logged a day",avg(tot.sleep)]];
+    if(mlDays) stats.splice(1,0,["🥛 Milk a day",ozText(Math.round(tot.ml/mlDays))]);
+    if(sleepDays){
+      stats.push(["🛌 Sleep a day",durText(tot.sleepMs/sleepDays)]);
+      stats.push(["⭐ Longest stretch",durText(longest)]);
+    }
+    stats.forEach(function(r){
       var d=document.createElement("div"); d.className="stat";
       d.innerHTML='<span>'+r[0]+'</span><b>'+r[1]+'</b>'; sc.appendChild(d);
     });
@@ -523,7 +733,7 @@
     dc.innerHTML='<h2>Day by day</h2><p class="note">Newest first. Days with nothing logged are shown too, so gaps are visible.</p>';
     var any=false;
     days.forEach(function(k){
-      var c=byDay[k]||{feed:0,wet:0,dirty:0,sleep:0};
+      var c=byDay[k]||{feed:0,wet:0,dirty:0,sleep:0,ml:0,sleepMs:0,longest:0};
       var logged=c.feed||c.wet||c.dirty||c.sleep;
       if(logged) any=true;
       var parts=k.split("-");
@@ -536,8 +746,12 @@
 
       var r=document.createElement("div"); r.className="hrow";
       var left=document.createElement("div");
+      var sub=[];
+      if(c.ml) sub.push(ozText(c.ml));
+      if(c.sleepMs) sub.push(durText(c.sleepMs)+" sleep");
+      if(logged) sub.push(ticked+" ticked");
       left.innerHTML='<div class="hday">'+(isToday?"Today":dt.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}))+'</div>'+
-        '<div class="hsub">'+(logged?(ticked+" checklist item"+(ticked===1?"":"s")+" ticked"):"nothing logged")+'</div>';
+        '<div class="hsub">'+(logged?sub.join(" · "):"nothing logged")+'</div>';
       var right=document.createElement("div"); right.className="hnums";
       right.textContent=logged? ("🍼"+c.feed+"  💧"+c.wet+"  💩"+c.dirty+"  😴"+c.sleep) : "—";
       r.appendChild(left); r.appendChild(right);
@@ -553,18 +767,86 @@
 
     // export
     var ec=document.createElement("div"); ec.className="card";
-    ec.innerHTML='<h2>Backup</h2><p class="note">Saves everything logged so far as a file you can keep or email to yourself.</p>';
-    var eb=document.createElement("button"); eb.className="btn btn-primary"; eb.textContent="⬇️ Export all data";
-    eb.onclick=function(){
-      var blob=new Blob([JSON.stringify(localState(),null,2)],{type:"application/json"});
-      var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
-      a.download="baby-daily-"+todayKey()+".json"; a.click();
-      setTimeout(function(){URL.revokeObjectURL(a.href);},2000);
-    };
-    ec.appendChild(eb);
+    ec.innerHTML='<h2>Backup</h2><p class="note">JSON is the full backup — keep it safe, it restores everything. CSV opens in Excel or Numbers if you want to chart things or show someone.</p>';
+
+    var ebrow=document.createElement("div");
+    ebrow.style.display="flex"; ebrow.style.gap="8px"; ebrow.style.flexWrap="wrap";
+
+    var eb=document.createElement("button"); eb.className="btn btn-primary"; eb.textContent="⬇️ JSON backup";
+    eb.onclick=function(){ download(JSON.stringify(localState(),null,2),"application/json","baby-daily-"+todayKey()+".json"); };
+    ebrow.appendChild(eb);
+
+    var cb2=document.createElement("button"); cb2.className="btn btn-ghost"; cb2.textContent="📊 CSV for Excel";
+    cb2.onclick=function(){ download(buildCSV(),"text/csv","baby-daily-"+todayKey()+".csv"); };
+    ebrow.appendChild(cb2);
+
+    ec.appendChild(ebrow);
     app.appendChild(ec);
 
     disclaimer();
+  }
+
+  function download(text,mime,filename){
+    var blob=new Blob([text],{type:mime+";charset=utf-8;"});
+    var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+    a.download=filename; a.style.display="none";
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); if(a.parentNode) a.parentNode.removeChild(a); },2000);
+  }
+
+  // Two sheets in one file would need a real spreadsheet format, so the CSV
+  // gives the per-event rows plus a daily summary block underneath.
+  function buildCSV(){
+    var names={feed:"Feed",wet:"Wet nappy",dirty:"Dirty nappy",sleep:"Sleep"};
+    var log=getJSON(K_LOG,[]).slice().sort(function(a,b){return (a.t||0)-(b.t||0);});
+    var birth=get(K_BIRTH);
+
+    function esc(v){
+      v=(v===undefined||v===null)?"":String(v);
+      return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+    }
+    function row(arr){ return arr.map(esc).join(","); }
+
+    var lines=[];
+    lines.push(row(["Date","Time","Type","Amount (fl oz)","Poo colour","Slept until","Sleep length","Awake before","Baby age (days)"]));
+
+    var byDay={};
+    log.forEach(function(e){
+      var age = birth ? Math.floor((new Date(e.day+"T00:00:00") - new Date(birth))/86400000) : "";
+      var pi = e.colour ? pooInfo(e.colour) : null;
+      var woke = awakeSince(log, e.t);
+      lines.push(row([
+        e.day,
+        e.t?clock(e.t):(e.label||""),
+        names[e.type]||e.type,
+        e.ml ? toOz(e.ml).toFixed(1) : "",
+        pi ? pi[1] : "",
+        (e.type==="sleep"&&e.end) ? clock(e.end) : "",
+        (e.type==="sleep"&&e.end) ? durText(e.end-e.t) : "",
+        (woke && e.t>woke) ? durText(e.t-woke) : "",
+        age
+      ]));
+      if(!byDay[e.day]) byDay[e.day]={feed:0,wet:0,dirty:0,sleep:0,ml:0,sleepMs:0,longest:0};
+      if(byDay[e.day][e.type]!==undefined) byDay[e.day][e.type]++;
+      if(e.ml) byDay[e.day].ml+=e.ml;
+      if(e.type==="sleep"&&e.end){
+        var dur=e.end-e.t;
+        byDay[e.day].sleepMs+=dur;
+        if(dur>byDay[e.day].longest) byDay[e.day].longest=dur;
+      }
+    });
+
+    lines.push("");
+    lines.push(row(["Daily totals"]));
+    lines.push(row(["Date","Feeds","Total fl oz","Wet nappies","Dirty nappies","Sleeps","Total sleep","Longest sleep"]));
+    Object.keys(byDay).sort().forEach(function(d){
+      var c=byDay[d];
+      lines.push(row([d,c.feed,c.ml?toOz(c.ml).toFixed(1):"",c.wet,c.dirty,c.sleep,
+        c.sleepMs?durText(c.sleepMs):"", c.longest?durText(c.longest):""]));
+    });
+
+    // Excel on Mac needs the BOM to read accented characters correctly
+    return "\ufeff"+lines.join("\r\n");
   }
 
   function renderMilestones(){
