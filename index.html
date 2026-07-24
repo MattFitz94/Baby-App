@@ -90,6 +90,25 @@
   input[type=date],input[type=text]{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:16px;font-family:inherit;color:var(--ink);font-weight:600;}
   label{font-size:14px;font-weight:700;display:block;margin-bottom:6px;}
 
+  /* sync status */
+  .syncbar{font-size:12px;font-weight:800;border-radius:10px;padding:7px 11px;margin-bottom:12px;background:var(--amberSoft);color:var(--amberDeep);}
+  .syncbar.ok{background:var(--greenSoft);color:#2C7A43;}
+  .syncbar.err{background:var(--redSoft);color:#8A2820;}
+  .syncbar.off{background:#EFEAE0;color:var(--muted);}
+
+  /* history */
+  .ranges{display:flex;gap:8px;margin-bottom:12px;}
+  .range{flex:1;border:1px solid var(--line);background:#fff;border-radius:10px;padding:9px 4px;font-size:13px;font-weight:800;font-family:inherit;color:var(--muted);cursor:pointer;}
+  .range.on{background:var(--amber);color:#fff;border-color:var(--amber);}
+  .hrow{display:grid;grid-template-columns:1fr auto;gap:8px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .hrow:last-child{border-bottom:none;}
+  .hday{font-size:14px;font-weight:800;}
+  .hsub{font-size:12px;color:var(--muted);font-weight:700;margin-top:2px;}
+  .hnums{font-size:13px;font-weight:800;color:var(--amberDeep);white-space:nowrap;align-self:center;}
+  .stat{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px;font-weight:700;}
+  .stat:last-child{border-bottom:none;}
+  .stat b{font-family:'Fraunces',serif;font-size:17px;}
+
   .disc{margin-top:18px;color:var(--muted);font-size:12px;line-height:1.6;border-top:1px solid var(--line);padding-top:14px;font-weight:600;}
   #boot{padding:40px 24px;color:var(--muted);font-weight:700;}
   .hide{display:none;}
@@ -103,13 +122,114 @@
 (function(){
   "use strict";
   var K_BIRTH="baby_birth_v1", K_CHECK="baby_check_v1", K_LOG="baby_log_v1";
+  var K_KEY="baby_key_v1", K_DEL="baby_del_v1";
+
+  // ---- your worker ----
+  var WORKER_URL="https://baby-log.mattfitzpatrick1994.workers.dev";
 
   function get(k){ try{return localStorage.getItem(k);}catch(e){return null;} }
   function set(k,v){ try{localStorage.setItem(k,v);}catch(e){} }
   function getJSON(k,f){ try{var s=localStorage.getItem(k);return s?JSON.parse(s):f;}catch(e){return f;} }
   function setJSON(k,v){ set(k,JSON.stringify(v)); }
 
-  function todayKey(){ var d=new Date(); return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+  function pad(n){ return n<10?"0"+n:""+n; }
+  function keyOf(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+  function todayKey(){ return keyOf(new Date()); }
+
+  function uid(){
+    return Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
+  }
+
+  // ---------- sync ----------
+  var SYNC={state:"idle",msg:""};
+
+  function secret(){ return get(K_KEY)||""; }
+  function syncOn(){ return !!secret() && WORKER_URL.indexOf("PASTE_")<0; }
+
+  // Older entries were written before ids and used unpadded day keys.
+  // Repair them once so merging and sorting behave.
+  function migrate(){
+    var log=getJSON(K_LOG,[]), dirty=false;
+    log.forEach(function(e){
+      if(!e.id){ e.id=uid(); dirty=true; }
+      if(e.day && e.day.length<10 && e.t){ e.day=keyOf(new Date(e.t)); dirty=true; }
+    });
+    if(dirty) setJSON(K_LOG,log);
+
+    var store=getJSON(K_CHECK,{}), cdirty=false, out={};
+    Object.keys(store).forEach(function(day){
+      var nd=day;
+      if(day.length<10){
+        var p=day.split("-");
+        if(p.length===3){ nd=p[0]+"-"+pad(+p[1])+"-"+pad(+p[2]); cdirty=true; }
+      }
+      var src=store[day], dst=out[nd]||{};
+      Object.keys(src).forEach(function(k){
+        var v=src[k];
+        // old format was a plain boolean; new format carries a timestamp
+        if(typeof v==="boolean"){ v={on:v,at:Date.now()}; cdirty=true; }
+        dst[k]=v;
+      });
+      out[nd]=dst;
+    });
+    if(cdirty) setJSON(K_CHECK,out);
+  }
+
+  function localState(){
+    return { events:getJSON(K_LOG,[]), checks:getJSON(K_CHECK,{}), deleted:getJSON(K_DEL,[]) };
+  }
+  function saveState(s){
+    setJSON(K_LOG,s.events||[]);
+    setJSON(K_CHECK,s.checks||{});
+    setJSON(K_DEL,s.deleted||[]);
+  }
+
+  function push(cb){
+    if(!syncOn()){ if(cb)cb(); return; }
+    SYNC.state="syncing"; paintSync();
+    fetch(WORKER_URL+"/log",{
+      method:"POST",
+      headers:{"content-type":"application/json","x-baby-key":secret()},
+      body:JSON.stringify(localState())
+    }).then(function(r){
+      if(r.status===401) throw new Error("Wrong passcode");
+      if(!r.ok) throw new Error("Sync failed");
+      return r.json();
+    }).then(function(s){
+      saveState(s); SYNC.state="ok"; SYNC.msg=""; paintSync(); if(cb)cb();
+    }).catch(function(e){
+      SYNC.state="err"; SYNC.msg=e.message; paintSync(); if(cb)cb();
+    });
+  }
+
+  function pull(cb){
+    if(!syncOn()){ if(cb)cb(); return; }
+    SYNC.state="syncing"; paintSync();
+    fetch(WORKER_URL+"/log",{headers:{"x-baby-key":secret()}})
+      .then(function(r){
+        if(r.status===401) throw new Error("Wrong passcode");
+        if(!r.ok) throw new Error("Sync failed");
+        return r.json();
+      }).then(function(remote){
+        // anything logged locally while offline still needs to go up
+        var local=localState();
+        var ids={}; (remote.events||[]).forEach(function(e){ids[e.id]=1;});
+        var unsent=(local.events||[]).filter(function(e){return !ids[e.id];});
+        saveState(remote);
+        if(unsent.length){ push(cb); return; }
+        SYNC.state="ok"; SYNC.msg=""; paintSync(); if(cb)cb();
+      }).catch(function(e){
+        SYNC.state="err"; SYNC.msg=e.message; paintSync(); if(cb)cb();
+      });
+  }
+
+  function paintSync(){
+    var el=document.getElementById("syncbar"); if(!el) return;
+    if(!syncOn()){ el.textContent="📴 This phone only — not syncing"; el.className="syncbar off"; return; }
+    if(SYNC.state==="syncing"){ el.textContent="⏳ Syncing…"; el.className="syncbar"; }
+    else if(SYNC.state==="err"){ el.textContent="⚠️ "+(SYNC.msg||"Offline")+" — saved on this phone"; el.className="syncbar err"; }
+    else { el.textContent="✅ Synced with your partner's phone"; el.className="syncbar ok"; }
+  }
   function ageDays(birth){ var b=new Date(birth); var now=new Date(); b.setHours(0,0,0,0); var t=new Date(); t.setHours(0,0,0,0); return Math.floor((t-b)/86400000); }
   function ageText(days){
     if(days<0) return "not born yet";
@@ -196,8 +316,22 @@
       '<label for="bd">Your baby\'s date of birth</label>';
     var inp=document.createElement("input"); inp.type="date"; inp.id="bd"; inp.max=new Date().toISOString().slice(0,10);
     c.appendChild(inp);
+    var kl=document.createElement("label"); kl.textContent="Sharing passcode"; kl.style.marginTop="16px";
+    c.appendChild(kl);
+    var kn=document.createElement("p"); kn.className="note"; kn.style.margin="0 0 6px";
+    kn.textContent="Enter the same passcode on both phones so your logs stay in sync. Leave it blank to keep everything on this phone only.";
+    c.appendChild(kn);
+    var kin=document.createElement("input"); kin.type="text"; kin.id="bk"; kin.value=get(K_KEY)||"";
+    kin.setAttribute("autocapitalize","none"); kin.setAttribute("autocorrect","off"); kin.setAttribute("spellcheck","false");
+    c.appendChild(kin);
+
     var btn=document.createElement("button"); btn.className="btn btn-primary"; btn.style.marginTop="14px"; btn.textContent="Start";
-    btn.onclick=function(){ if(!inp.value){ inp.focus(); return; } set(K_BIRTH,inp.value); TAB="today"; renderTabs(); render(); };
+    btn.onclick=function(){ if(!inp.value){ inp.focus(); return; }
+      set(K_BIRTH,inp.value);
+      var kv=kin.value.trim(); if(kv) set(K_KEY,kv); else localStorage.removeItem(K_KEY);
+      TAB="today"; renderTabs();
+      pull(function(){ render(); });
+      render(); };
     c.appendChild(btn);
     app.appendChild(c);
 
@@ -232,16 +366,25 @@
     cl.innerHTML='<h2>Daily checklist</h2><p class="note">Resets each day. Tap to tick off.</p>';
     var items=dailyChecklist(days);
     var store=getJSON(K_CHECK,{}); var tkey=todayKey(); var done=store[tkey]||{};
+    function isOn(v){ return !!(v && v.on); }
     items.forEach(function(item,idx){
-      var r=document.createElement("div"); r.className="check"+(done[idx]?" done":"");
-      var bx=document.createElement("div"); bx.className="box"+(done[idx]?" on":"");
+      var r=document.createElement("div"); r.className="check"+(isOn(done[idx])?" done":"");
+      var bx=document.createElement("div"); bx.className="box"+(isOn(done[idx])?" on":"");
       var lb=document.createElement("div"); lb.className="lbl"; lb.textContent=item;
       r.appendChild(bx); r.appendChild(lb);
-      r.onclick=function(){ done[idx]=!done[idx]; store[tkey]=done; setJSON(K_CHECK,store);
-        r.className="check"+(done[idx]?" done":""); bx.className="box"+(done[idx]?" on":""); };
+      r.onclick=function(){ done[idx]={on:!isOn(done[idx]),at:Date.now()}; store[tkey]=done; setJSON(K_CHECK,store);
+        r.className="check"+(isOn(done[idx])?" done":""); bx.className="box"+(isOn(done[idx])?" on":"");
+        push(); };
       cl.appendChild(r);
     });
     app.appendChild(cl);
+
+    // growth moved here so the bottom bar stays at five tabs
+    var gl=document.createElement("div"); gl.style.marginTop="4px";
+    var gb=document.createElement("button"); gb.className="btn btn-ghost"; gb.textContent="⭐ Growth & milestones";
+    gb.onclick=function(){ TAB="milestones"; renderTabs(); render(); };
+    gl.appendChild(gb); app.appendChild(gl);
+
     disclaimer();
   }
 
@@ -276,6 +419,9 @@
     h.innerHTML='<div class="stage">TRACKERS · '+new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+'</div><div class="big">Today\'s log</div>';
     app.appendChild(h);
 
+    var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
+    app.appendChild(sb); paintSync();
+
     var log=getJSON(K_LOG,[]); var tkey=todayKey();
     var todayLog=log.filter(function(e){return e.day===tkey;});
 
@@ -292,8 +438,9 @@
     var grid=document.createElement("div"); grid.className="track-btns";
     [["feed","🍼 Feed"],["wet","💧 Wet"],["dirty","💩 Dirty"],["sleep","😴 Sleep"]].forEach(function(t){
       var b=document.createElement("button"); b.className="tbtn "+t[0]; b.textContent=t[1];
-      b.onclick=function(){ var now=new Date(); log.push({type:t[0],day:tkey,t:now.getTime(),
-        label:now.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}); setJSON(K_LOG,log); renderTrackers(); };
+      b.onclick=function(){ var now=new Date(); log.push({id:uid(),type:t[0],day:tkey,t:now.getTime(),
+        label:now.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}); setJSON(K_LOG,log);
+        renderTrackers(); push(); };
       grid.appendChild(b);
     });
     c.appendChild(grid);
@@ -309,12 +456,114 @@
         var r=document.createElement("div"); r.className="logrow";
         var left=document.createElement("span"); left.textContent=icons[e.type]+" · "+e.label;
         var del=document.createElement("span"); del.className="del"; del.textContent="remove";
-        del.onclick=function(){ var i=log.indexOf(e); if(i>=0){log.splice(i,1);setJSON(K_LOG,log);renderTrackers();} };
+        del.onclick=function(){ var i=log.indexOf(e); if(i>=0){ log.splice(i,1); setJSON(K_LOG,log);
+          var d=getJSON(K_DEL,[]); if(e.id){ d.push(e.id); setJSON(K_DEL,d); }
+          renderTrackers(); push(); } };
         r.appendChild(left); r.appendChild(del); wrap.appendChild(r);
       });
       lc.appendChild(wrap);
     }
     app.appendChild(lc);
+    disclaimer();
+  }
+
+  var RANGE=7;
+  function renderHistory(){
+    app.innerHTML="";
+    var h=document.createElement("div"); h.className="age-hero";
+    h.innerHTML='<div class="stage">HISTORY</div><div class="big">How things are going</div>';
+    app.appendChild(h);
+
+    var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
+    app.appendChild(sb); paintSync();
+
+    var log=getJSON(K_LOG,[]);
+    var checks=getJSON(K_CHECK,{});
+
+    // build the day list, newest first, including days with nothing logged
+    var days=[]; var now=new Date(); now.setHours(0,0,0,0);
+    for(var i=0;i<RANGE;i++){ var d=new Date(now.getTime()-i*86400000); days.push(keyOf(d)); }
+
+    var byDay={};
+    log.forEach(function(e){
+      if(!byDay[e.day]) byDay[e.day]={feed:0,wet:0,dirty:0,sleep:0};
+      if(byDay[e.day][e.type]!==undefined) byDay[e.day][e.type]++;
+    });
+
+    // range buttons
+    var rc=document.createElement("div"); rc.className="ranges";
+    [7,14,30].forEach(function(n){
+      var b=document.createElement("button"); b.className="range"+(RANGE===n?" on":"");
+      b.textContent=n+" days";
+      b.onclick=function(){ RANGE=n; renderHistory(); };
+      rc.appendChild(b);
+    });
+    app.appendChild(rc);
+
+    // averages
+    var tot={feed:0,wet:0,dirty:0,sleep:0}, activeDays=0;
+    days.forEach(function(k){
+      var c=byDay[k]; if(!c) return;
+      if(c.feed||c.wet||c.dirty||c.sleep) activeDays++;
+      tot.feed+=c.feed; tot.wet+=c.wet; tot.dirty+=c.dirty; tot.sleep+=c.sleep;
+    });
+    function avg(n){ return activeDays? (n/activeDays).toFixed(1) : "—"; }
+
+    var sc=document.createElement("div"); sc.className="card";
+    sc.innerHTML='<h2>Daily average</h2><p class="note">Across the '+activeDays+' day'+(activeDays===1?"":"s")+' with anything logged in this range.</p>';
+    [["🍼 Feeds a day",avg(tot.feed)],["💧 Wet nappies a day",avg(tot.wet)],
+     ["💩 Dirty nappies a day",avg(tot.dirty)],["😴 Sleeps logged a day",avg(tot.sleep)]].forEach(function(r){
+      var d=document.createElement("div"); d.className="stat";
+      d.innerHTML='<span>'+r[0]+'</span><b>'+r[1]+'</b>'; sc.appendChild(d);
+    });
+    app.appendChild(sc);
+
+    // day by day
+    var dc=document.createElement("div"); dc.className="card";
+    dc.innerHTML='<h2>Day by day</h2><p class="note">Newest first. Days with nothing logged are shown too, so gaps are visible.</p>';
+    var any=false;
+    days.forEach(function(k){
+      var c=byDay[k]||{feed:0,wet:0,dirty:0,sleep:0};
+      var logged=c.feed||c.wet||c.dirty||c.sleep;
+      if(logged) any=true;
+      var parts=k.split("-");
+      var dt=new Date(+parts[0],+parts[1]-1,+parts[2]);
+      var isToday=(k===todayKey());
+
+      // checklist completion for that day
+      var cd=checks[k]||{}; var ticked=0;
+      Object.keys(cd).forEach(function(x){ if(cd[x]&&cd[x].on) ticked++; });
+
+      var r=document.createElement("div"); r.className="hrow";
+      var left=document.createElement("div");
+      left.innerHTML='<div class="hday">'+(isToday?"Today":dt.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}))+'</div>'+
+        '<div class="hsub">'+(logged?(ticked+" checklist item"+(ticked===1?"":"s")+" ticked"):"nothing logged")+'</div>';
+      var right=document.createElement("div"); right.className="hnums";
+      right.textContent=logged? ("🍼"+c.feed+"  💧"+c.wet+"  💩"+c.dirty+"  😴"+c.sleep) : "—";
+      r.appendChild(left); r.appendChild(right);
+      dc.appendChild(r);
+    });
+    app.appendChild(dc);
+
+    if(!any){
+      var e=document.createElement("p"); e.className="note";
+      e.textContent="Nothing logged in this range yet. Anything you add on the Track tab will show up here.";
+      dc.appendChild(e);
+    }
+
+    // export
+    var ec=document.createElement("div"); ec.className="card";
+    ec.innerHTML='<h2>Backup</h2><p class="note">Saves everything logged so far as a file you can keep or email to yourself.</p>';
+    var eb=document.createElement("button"); eb.className="btn btn-primary"; eb.textContent="⬇️ Export all data";
+    eb.onclick=function(){
+      var blob=new Blob([JSON.stringify(localState(),null,2)],{type:"application/json"});
+      var a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+      a.download="baby-daily-"+todayKey()+".json"; a.click();
+      setTimeout(function(){URL.revokeObjectURL(a.href);},2000);
+    };
+    ec.appendChild(eb);
+    app.appendChild(ec);
+
     disclaimer();
   }
 
@@ -366,12 +615,22 @@
     d.textContent="General information only — not medical advice, diagnosis, or a substitute for your pediatrician. Babies vary; these are typical ranges, not rules. For anything about your baby's health, or whenever you're worried, contact your doctor or emergency services.";
     app.appendChild(d);
     var reset=document.createElement("div"); reset.style.marginTop="10px";
+    reset.style.display="flex"; reset.style.gap="8px"; reset.style.flexWrap="wrap";
     var b=document.createElement("button"); b.className="btn btn-ghost"; b.textContent="Change birth date";
     b.onclick=function(){ if(confirm("Change your baby's date of birth?")){ localStorage.removeItem(K_BIRTH); render(); } };
-    reset.appendChild(b); app.appendChild(reset);
+    reset.appendChild(b);
+    var kb=document.createElement("button"); kb.className="btn btn-ghost"; kb.textContent="Sharing passcode";
+    kb.onclick=function(){
+      var v=prompt("Sharing passcode — the same on both phones. Leave blank for this phone only.", get(K_KEY)||"");
+      if(v===null) return;
+      v=v.trim(); if(v) set(K_KEY,v); else localStorage.removeItem(K_KEY);
+      pull(function(){ render(); });
+    };
+    reset.appendChild(kb);
+    app.appendChild(reset);
   }
 
-  var TABS=[["today","🏠","Today"],["schedule","🕐","Schedule"],["track","📝","Track"],["milestones","⭐","Growth"],["flags","🚨","Doctor"]];
+  var TABS=[["today","🏠","Today"],["track","📝","Track"],["history","📊","History"],["schedule","🕐","Schedule"],["flags","🚨","Doctor"]];
   function renderTabs(){
     var t=document.getElementById("tabs"); t.innerHTML="";
     if(needsBirth()){ t.style.display="none"; return; } t.style.display="flex";
@@ -388,12 +647,28 @@
     if(TAB==="today") renderToday();
     else if(TAB==="schedule") renderSchedule();
     else if(TAB==="track") renderTrackers();
+    else if(TAB==="history") renderHistory();
     else if(TAB==="milestones") renderMilestones();
     else if(TAB==="flags") renderFlags();
     window.scrollTo(0,0);
   }
 
-  try{ renderTabs(); render(); }
+  // pull again when the app comes back to the foreground, so the phone in
+  // your pocket catches up with whatever was logged while it was closed
+  var lastPull=0;
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState!=="visible") return;
+    if(Date.now()-lastPull<15000) return;
+    lastPull=Date.now();
+    pull(function(){ if(TAB==="track"||TAB==="history"||TAB==="today") render(); });
+  });
+
+  try{
+    migrate();
+    renderTabs(); render();
+    lastPull=Date.now();
+    pull(function(){ render(); });
+  }
   catch(err){ document.getElementById("boot").textContent="Something went wrong: "+err.message; }
 })();
 </script>
