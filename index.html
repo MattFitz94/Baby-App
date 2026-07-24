@@ -96,6 +96,13 @@
   .syncbar.err{background:var(--redSoft);color:#8A2820;}
   .syncbar.off{background:#EFEAE0;color:var(--muted);}
 
+  /* age tracker */
+  .agegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:8px;}
+  .agecell{background:var(--amberSoft);border-radius:14px;padding:12px 6px;text-align:center;}
+  .agenum{font-family:'Fraunces',serif;font-size:26px;font-weight:600;color:var(--amberDeep);line-height:1;}
+  .ageunit{font-size:12px;font-weight:800;color:var(--amberDeep);margin-top:3px;text-transform:uppercase;letter-spacing:0.3px;}
+  .agesub{font-size:11px;font-weight:700;color:var(--muted);margin-top:4px;}
+
   .swatch{width:34px;height:34px;border-radius:10px;flex-shrink:0;border:1px solid rgba(0,0,0,0.15);}
 
   /* history */
@@ -124,7 +131,8 @@
 (function(){
   "use strict";
   var K_BIRTH="baby_birth_v1", K_CHECK="baby_check_v1", K_LOG="baby_log_v1";
-  var K_KEY="baby_key_v1", K_DEL="baby_del_v1";
+  var K_KEY="baby_key_v1", K_DEL="baby_del_v1", K_NAME="baby_name_v1", K_SEX="baby_sex_v1";
+  var K_HEALTH="baby_health_v1", K_SCHED="baby_sched_v1";
 
   // ---- your worker ----
   var WORKER_URL="https://baby-log.mattfitzpatrick1994.workers.dev";
@@ -141,6 +149,103 @@
   function uid(){
     return Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,10);
   }
+
+  // ---------- vaccine schedules ----------
+  // Two schedules, picked in settings. Ages are the routine windows; what
+  // actually gets given is whatever your clinic administers on the day, which
+  // is why every item is a manual tick with a date rather than auto-completing.
+  var SCHEDULES={
+    aap:{
+      name:"US — AAP 2026",
+      note:"American Academy of Pediatrics 2026 schedule. Since January 2026 the CDC schedule differs from this one on several vaccines — your pediatrician will tell you which they follow.",
+      visits:[
+        {age:0,   label:"Birth",      items:["HepB — dose 1 (within 24 hrs)"]},
+        {age:30,  label:"1 month",    items:["HepB — dose 2 (1–2 months)"]},
+        {age:61,  label:"2 months",   items:["DTaP — 1","Hib — 1","PCV — 1","IPV (polio) — 1","Rotavirus — 1"]},
+        {age:122, label:"4 months",   items:["DTaP — 2","Hib — 2","PCV — 2","IPV (polio) — 2","Rotavirus — 2"]},
+        {age:183, label:"6 months",   items:["DTaP — 3","Hib — 3 (if brand needs it)","PCV — 3","IPV (polio) — 3 (6–18 mo)","Rotavirus — 3 (if brand needs it)","HepB — dose 3 (6–18 mo)","COVID-19 — series from 6 mo","Influenza — yearly from 6 mo"]},
+        {age:274, label:"9 months",   items:["Check-up — catch up on anything missed"]},
+        {age:365, label:"12 months",  items:["MMR — 1 (12–15 mo)","Varicella — 1 (12–15 mo)","HepA — 1 (12–23 mo)","PCV — 4 (12–15 mo)","Hib — booster (12–15 mo)"]},
+        {age:456, label:"15 months",  items:["DTaP — 4 (15–18 mo)"]},
+        {age:548, label:"18 months",  items:["HepA — 2 (6 mo after dose 1)"]},
+        {age:1461,label:"4–6 years",  items:["DTaP — 5","IPV (polio) — 4","MMR — 2","Varicella — 2"]}
+      ],
+      seasonal:["RSV — nirsevimab or clesrovimab, one dose in RSV season (Oct–Mar) if mum didn't have the RSV vaccine in pregnancy, or had it under 14 days before birth","Influenza — yearly from 6 months"]
+    },
+    uk:{
+      name:"UK — NHS",
+      note:"The NHS routine childhood schedule. Useful if you're registering with a GP in the UK or travelling back.",
+      visits:[
+        {age:61,  label:"8 weeks",    items:["6-in-1 (DTaP/IPV/Hib/HepB) — 1","Rotavirus — 1","MenB — 1"]},
+        {age:92,  label:"12 weeks",   items:["6-in-1 — 2","Rotavirus — 2","Pneumococcal (PCV) — 1"]},
+        {age:122, label:"16 weeks",   items:["6-in-1 — 3","MenB — 2"]},
+        {age:365, label:"1 year",     items:["Hib/MenC","MMR — 1","Pneumococcal (PCV) — 2","MenB — 3"]},
+        {age:1186,label:"3 yrs 4 mo", items:["4-in-1 pre-school booster","MMR — 2"]}
+      ],
+      seasonal:["Children's flu vaccine — yearly nasal spray from 2 years","Vitamin D drops — daily from birth if breastfed or having under 500ml formula a day"]
+    }
+  };
+  function schedKey(){ var s=get(K_SCHED); return (s==="uk"||s==="aap")?s:"aap"; }
+  function sched(){ return SCHEDULES[schedKey()]; }
+
+  // ---------- health records ----------
+  // { vax:{ "<schedule>|<visit>|<item>": {on,at,date} }, growth:[...], temps:[...] }
+  function healthState(){
+    var h=getJSON(K_HEALTH,null);
+    if(!h||typeof h!=="object") h={};
+    if(!h.vax) h.vax={};
+    if(!h.miles) h.miles={};
+    if(!Array.isArray(h.growth)) h.growth=[];
+    if(!Array.isArray(h.temps)) h.temps=[];
+    return h;
+  }
+  function saveHealth(h){ setJSON(K_HEALTH,h); push(); }
+
+  function lbOz(kg){
+    if(!kg) return "";
+    var total=kg*2.20462;
+    var lb=Math.floor(total);
+    var oz=Math.round((total-lb)*16);
+    if(oz===16){ lb++; oz=0; }
+    return lb+"lb "+oz+"oz";
+  }
+  function inches(cm){ return cm? (cm/2.54).toFixed(1)+'"' : ""; }
+  function toF(c){ return (c*9/5+32); }
+
+  // Under 3 months this is an emergency, and it stays a red flag after that.
+  var FEVER_C=38.0;
+  function feverLevel(c){
+    if(c>=FEVER_C) return "fever";
+    if(c<=36.0) return "low";
+    return "ok";
+  }
+  // Everything user-facing goes through these, so the app reads naturally
+  // whether a name is set or not, and whether or not you know the sex yet.
+  // ---------- name & pronouns ----------
+  function babyName(){ var n=get(K_NAME); return n&&n.trim()?n.trim():""; }
+  // Subject of a sentence: "Alfie is 3 weeks old" / "Baby is 3 weeks old"
+  function Baby(){ return babyName()||"Baby"; }
+  // Mid-sentence: "how long Alfie had been awake" / "how long baby had been awake"
+  function baby(){ return babyName()||"baby"; }
+  // Possessive: "Alfie's cues" / "baby's cues"
+  function babys(){
+    var n=babyName();
+    if(!n) return "baby's";
+    return n+(/s$/i.test(n)?"'":"'s");
+  }
+  function Babys(){
+    var n=babyName();
+    if(!n) return "Baby's";
+    return n+(/s$/i.test(n)?"'":"'s");
+  }
+  var PRONOUNS={
+    girl:{they:"she",them:"her",their:"her",theyre:"she's",theyve:"she's",s:"s"},
+    boy: {they:"he", them:"him",their:"his",theyre:"he's", theyve:"he's", s:"s"},
+    "":  {they:"they",them:"them",their:"their",theyre:"they're",theyve:"they've",s:""}
+  };
+  function P(){ return PRONOUNS[get(K_SEX)||""]||PRONOUNS[""]; }
+  // "she stops" vs "they stop" - verb agreement follows the pronoun
+  function vs(verb){ return verb+P().s; }
 
   // Format from the stored timestamp rather than the saved label, so entries
   // logged before this change display in 12-hour time too.
@@ -184,12 +289,13 @@
   }
 
   function localState(){
-    return { events:getJSON(K_LOG,[]), checks:getJSON(K_CHECK,{}), deleted:getJSON(K_DEL,[]) };
+    return { events:getJSON(K_LOG,[]), checks:getJSON(K_CHECK,{}), deleted:getJSON(K_DEL,[]), health:healthState() };
   }
   function saveState(s){
     setJSON(K_LOG,s.events||[]);
     setJSON(K_CHECK,s.checks||{});
     setJSON(K_DEL,s.deleted||[]);
+    if(s.health) setJSON(K_HEALTH,s.health);
   }
 
   function push(cb){
@@ -253,6 +359,49 @@
     else { el.textContent="✅ Synced with your partner's phone"; el.className="syncbar ok"; }
   }
   function ageDays(birth){ var b=new Date(birth); var now=new Date(); b.setHours(0,0,0,0); var t=new Date(); t.setHours(0,0,0,0); return Math.floor((t-b)/86400000); }
+  // Calendar-accurate breakdown: months and years count actual calendar
+  // months, so "2 months" means the same date two months on, not 61 days.
+  function ageParts(birth){
+    var b=new Date(birth+"T00:00:00");
+    var t=new Date(); t.setHours(0,0,0,0);
+    var days=Math.floor((t-b)/86400000);
+
+    // whole calendar months elapsed
+    var months=(t.getFullYear()-b.getFullYear())*12+(t.getMonth()-b.getMonth());
+    if(t.getDate()<b.getDate()) months--;
+    if(months<0) months=0;
+
+    // days since that monthly anniversary. A birth day that doesn't exist in
+    // the target month (31st -> February) is clamped to that month's last day,
+    // otherwise JS rolls it into the following month and the count goes wrong.
+    function annivFor(monthsOn){
+      var y=b.getFullYear(), mo=b.getMonth()+monthsOn;
+      var lastDay=new Date(y, mo+1, 0).getDate();
+      return new Date(y, mo, Math.min(b.getDate(), lastDay));
+    }
+    var anniv=annivFor(months);
+    if(anniv>t) anniv=annivFor(months-1);
+    var daysIntoMonth=Math.max(0,Math.floor((t-anniv)/86400000));
+
+    var years=Math.floor(months/12);
+    var monthsIntoYear=months%12;
+    var daysToNextMonth=Math.max(0,Math.ceil((annivFor(months+1)-t)/86400000));
+
+    return {
+      days: days,
+      weeks: Math.floor(days/7),
+      daysIntoWeek: days%7,
+      months: months,
+      daysIntoMonth: daysIntoMonth,
+      daysToNextMonth: daysToNextMonth,
+      years: years,
+      monthsIntoYear: monthsIntoYear,
+      nextBirthday: new Date(b.getFullYear()+years+1, b.getMonth(), b.getDate())
+    };
+  }
+
+  function plural(n,word){ return n+" "+word+(n===1?"":"s"); }
+
   function ageText(days){
     if(days<0) return "not born yet";
     if(days===0) return "born today 🎉";
@@ -273,10 +422,10 @@
   function guidance(days){
     var st=stageOf(days);
     var feed = days<28
-      ? "Every 2–3 hours, 8–12 times a day, day and night. Follow hunger cues; wake to feed if 3+ hrs have passed in the day."
+      ? "Every 2–3 hours, 8–12 times a day, day and night. Follow hunger cues; wake "+P().them+" to feed if 3+ hrs have passed in the day."
       : "Roughly every 2.5–3.5 hours, ~7–9 feeds a day. Longer night stretches may start to appear.";
     var wake = days<28
-      ? "35–60 minutes awake between sleeps — very short. Watch for sleepy cues and settle early."
+      ? "35–60 minutes awake between sleeps — very short. Watch for sleepy cues and settle "+P().them+" early."
       : days<84
         ? "60–90 minutes awake between sleeps."
         : "About 75–120 minutes awake between sleeps.";
@@ -288,7 +437,7 @@
       : "6+ wet nappies a day, and regular soft yellow stools (breastfed babies can vary a lot — that's normal).";
     var focus = {
       week1: ["Umbilical cord: keep clean & dry, fold nappy below it", "Feed on demand, wake to feed if sleepy", "Back to sleep, firm flat surface, nothing in the cot", "Track wet/dirty nappies to confirm feeding is working", "First pediatrician visit is usually 3–5 days old"],
-      weeks2to4: ["Baby should be back to birth weight by ~2 weeks", "Cord stump usually falls off 1–3 weeks", "Tummy time: a few minutes, a few times a day, while awake & watched", "Day/night confusion is normal now"],
+      weeks2to4: [Baby()+" should be back to birth weight by ~2 weeks", "Cord stump usually falls off 1–3 weeks", "Tummy time: a few minutes, a few times a day, while awake & watched", "Day/night confusion is normal now"],
       weeks5to8: ["First real smiles may appear ✨", "Longer alert periods — gentle play, talking, contrast pictures", "2-month check-up & first vaccines usually due", "Cluster feeding & evening fussiness can peak"],
       weeks9to12: ["More cooing and 'talking' back", "Starting to hold head steadier during tummy time", "Naps may start consolidating a little"],
       months3plus: ["Clearer day/night rhythm forming", "Rolling may start — never leave on a raised surface", "More interactive: laughing, reaching for things"]
@@ -305,7 +454,7 @@
       "Back to sleep every sleep, cot clear",
       "Tummy time while awake & supervised",
       "Cuddles / skin-to-skin / talking time",
-      "Check baby's temperature feels normal (not hot/cold)",
+      "Check "+babys()+" temperature feels normal (not hot/cold)",
       "You ate, drank water, and rested when you could 💛"
     ];
     if(days<21) base.splice(4,0,"Umbilical cord clean & dry");
@@ -336,7 +485,34 @@
     var c=document.createElement("div"); c.className="card";
     c.innerHTML='<h1 class="title">Welcome 💛</h1>'+
       '<p class="note">This little app is your daily newborn companion — schedules, checklists, trackers, milestones, and a when-to-call-the-doctor guide, all tuned to your baby\'s age.</p>'+
-      '<label for="bd">Your baby\'s date of birth</label>';
+      '<label for="bn">Baby\'s name</label>';
+    var nin=document.createElement("input"); nin.type="text"; nin.id="bn"; nin.value=get(K_NAME)||"";
+    nin.setAttribute("placeholder","Leave blank to just say \u201Cbaby\u201D");
+    nin.setAttribute("autocapitalize","words"); nin.setAttribute("autocorrect","off");
+    c.appendChild(nin);
+
+    var sl=document.createElement("label"); sl.textContent="Boy or girl?"; sl.style.marginTop="16px";
+    c.appendChild(sl);
+    var sn=document.createElement("p"); sn.className="note"; sn.style.margin="0 0 8px";
+    sn.textContent="Only changes the wording. Pick \u201CNot saying\u201D and the app says \u201Cthey\u201D throughout \u2014 you can change it any time.";
+    c.appendChild(sn);
+
+    var SEX=get(K_SEX)||"";
+    var srow=document.createElement("div"); srow.className="ranges";
+    [["","Not saying"],["girl","Girl"],["boy","Boy"]].forEach(function(o){
+      var b=document.createElement("button"); b.className="range"+(SEX===o[0]?" on":"");
+      b.textContent=o[1];
+      b.onclick=function(){
+        SEX=o[0];
+        Array.prototype.forEach.call(srow.children,function(x){ x.className="range"; });
+        b.className="range on";
+      };
+      srow.appendChild(b);
+    });
+    c.appendChild(srow);
+
+    var dl=document.createElement("label"); dl.textContent="Date of birth"; dl.style.marginTop="16px";
+    c.appendChild(dl);
     var inp=document.createElement("input"); inp.type="date"; inp.id="bd"; inp.max=new Date().toISOString().slice(0,10);
     c.appendChild(inp);
     var kl=document.createElement("label"); kl.textContent="Sharing passcode"; kl.style.marginTop="16px";
@@ -351,6 +527,8 @@
     var btn=document.createElement("button"); btn.className="btn btn-primary"; btn.style.marginTop="14px"; btn.textContent="Start";
     btn.onclick=function(){ if(!inp.value){ inp.focus(); return; }
       set(K_BIRTH,inp.value);
+      var nv=nin.value.trim(); if(nv) set(K_NAME,nv); else localStorage.removeItem(K_NAME);
+      if(SEX) set(K_SEX,SEX); else localStorage.removeItem(K_SEX);
       var kv=kin.value.trim(); if(kv) set(K_KEY,kv); else localStorage.removeItem(K_KEY);
       TAB="today"; renderTabs();
       pull(function(){ render(); });
@@ -368,7 +546,7 @@
     var h=document.createElement("div"); h.className="age-hero";
     var g=guidance(days);
     h.innerHTML='<div class="stage">TODAY · '+new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+'</div>'+
-      '<div class="big">Baby is '+ageText(days)+'</div>';
+      '<div class="big">'+Baby()+' is '+ageText(days)+'</div>';
     return {el:h,days:days,g:g};
   }
 
@@ -377,9 +555,44 @@
     var hero=ageHero(); app.appendChild(hero.el);
     var days=hero.days, g=hero.g;
 
+    // ---- age tracker ----
+    var A=ageParts(get(K_BIRTH));
+    var ac=document.createElement("div"); ac.className="card";
+    ac.innerHTML='<h2>How old is '+Baby()+'?</h2>';
+
+    var ag=document.createElement("div"); ag.className="agegrid";
+    function cell(num,unit,sub){
+      var d=document.createElement("div"); d.className="agecell";
+      d.innerHTML='<div class="agenum">'+num+'</div><div class="ageunit">'+unit+'</div>'+
+        (sub?'<div class="agesub">'+sub+'</div>':'');
+      ag.appendChild(d);
+    }
+    cell(A.days, A.days===1?"day":"days", "");
+    cell(A.weeks, A.weeks===1?"week":"weeks", A.daysIntoWeek?"+ "+plural(A.daysIntoWeek,"day"):"exactly");
+    cell(A.months, A.months===1?"month":"months", A.daysIntoMonth?"+ "+plural(A.daysIntoMonth,"day"):"exactly");
+    if(A.years>0){
+      cell(A.years, A.years===1?"year":"years", A.monthsIntoYear?"+ "+plural(A.monthsIntoYear,"month"):"exactly");
+    }
+    ac.appendChild(ag);
+
+    // a small line of context underneath
+    var note=document.createElement("p"); note.className="note"; note.style.margin="12px 0 0";
+    if(A.days===0) note.textContent="Born today. 🎉";
+    else if(A.days<7) note.textContent="First week — "+plural(7-A.days,"day")+" until "+Baby()+" is one week old.";
+    else if(A.months<1) note.textContent=plural(7-A.daysIntoWeek,"day")+" until "+plural(A.weeks+1,"week")+".";
+    else if(A.years<1){
+      note.textContent=plural(A.daysToNextMonth,"day")+" until "+plural(A.months+1,"month")+".";
+    }
+    else {
+      var toBd=Math.ceil((A.nextBirthday - new Date().setHours(0,0,0,0))/86400000);
+      note.textContent=plural(toBd,"day")+" until "+Babys()+" next birthday. 🎂";
+    }
+    ac.appendChild(note);
+    app.appendChild(ac);
+
     // today's focus
     var f=document.createElement("div"); f.className="card";
-    f.innerHTML='<h2>What to focus on now</h2><p class="note">Key things for your baby\'s current stage.</p>';
+    f.innerHTML='<h2>What to focus on now</h2><p class="note">Key things for '+babys()+' current stage.</p>';
     g.focus.forEach(function(item){ var p=document.createElement("div"); p.className="check"; p.style.cursor="default";
       p.innerHTML='<div class="box on" style="cursor:default"></div><div class="lbl" style="font-weight:700">'+item+'</div>'; f.appendChild(p); });
     app.appendChild(f);
@@ -404,7 +617,11 @@
 
     // growth moved here so the bottom bar stays at five tabs
     var gl=document.createElement("div"); gl.style.marginTop="4px";
-    var gb=document.createElement("button"); gb.className="btn btn-ghost"; gb.textContent="⭐ Growth & milestones";
+    gl.style.display="flex"; gl.style.gap="8px"; gl.style.flexWrap="wrap";
+    var sbtn=document.createElement("button"); sbtn.className="btn btn-ghost"; sbtn.textContent="🕐 Feeding & sleep guide";
+    sbtn.onclick=function(){ TAB="schedule"; renderTabs(); render(); };
+    gl.appendChild(sbtn);
+    var gb=document.createElement("button"); gb.className="btn btn-ghost"; gb.textContent="⭐ What "+baby()+" can do";
     gb.onclick=function(){ TAB="milestones"; renderTabs(); render(); };
     gl.appendChild(gb); app.appendChild(gl);
 
@@ -429,15 +646,15 @@
     block("Formula — ready to feed","Kendamil ready-to-feed. It's sterile in the sealed carton, so no making up or cooling needed — but once it's open the clock starts.",[
       ["Before opening","Store the carton at room temperature. Shake well. No need to boil water or sterilise anything for the liquid itself — bottles and teats still need sterilising."],
       ["Once opened","Cover and refrigerate. Use within 24 hours, then bin whatever's left."],
-      ["Warming","Stand the bottle in warm water. Never microwave — it heats unevenly and can scald. Body temperature is plenty; cold from the fridge is also fine if baby takes it."],
+      ["Warming","Stand the bottle in warm water. Never microwave — it heats unevenly and can scald. Body temperature is plenty; cold from the fridge is also fine if "+baby()+" takes it."],
       ["Out of the fridge","Once warmed or poured, use within 2 hours. If it's been sitting out longer than that, throw it away."],
       ["After a feed","Discard anything left in the bottle within 1 hour — saliva gets in and bacteria grow. Don't save it for later."],
-      ["How much","Follow your baby's cues rather than a number: offer, let them stop when they're done, and don't push the last bit. Your health visitor or pediatrician will tell you the right volumes for your baby's weight and how it splits with breastfeeding — that's worth asking at your next check."],
+      ["How much","Follow "+babys()+" cues rather than a number: offer, let "+P().them+" stop when "+P().theyre+" done, and don't push the last bit. Your health visitor or pediatrician will tell you the right volumes for "+babys()+" weight and how it splits with breastfeeding — that's worth asking at your next check."],
       ["Kendamil note","It's a whole-milk formula, so it looks and smells creamier than many others. Stools may change colour or consistency when starting or switching — usually normal, but mention it if you're unsure."]
     ]);
     block("Sleep & wake",null,[
       ["Wake window",g.wake],["Total sleep",g.sleep],
-      ["Safe sleep","On the back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
+      ["Safe sleep","On "+P().their+" back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
     ]);
     block("Nappies",null,[
       ["Expect",g.nappies],["Watch","Fewer than 6 wet a day, or very dark strong urine, is worth a call."]
@@ -500,7 +717,7 @@
   function renderTrackers(){
     app.innerHTML="";
     var h=document.createElement("div"); h.className="age-hero";
-    h.innerHTML='<div class="stage">TRACKERS · '+new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+'</div><div class="big">Today\'s log</div>';
+    h.innerHTML='<div class="stage">TRACKERS · '+new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})+'</div><div class="big">'+Babys()+' day</div>';
     app.appendChild(h);
 
     var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
@@ -555,7 +772,7 @@
     // feed
     var fb=document.createElement("button"); fb.className="tbtn feed"; fb.textContent="🍼 Feed";
     fb.onclick=function(){
-      var v=prompt("How much did baby take? (fl oz)\n\nLeave blank if breastfed or you'd rather not record it.","");
+      var v=prompt("How much did "+baby()+" take? (fl oz)\n\nLeave blank if breastfed or you'd rather not record it.","");
       if(v===null) return;
       v=v.trim().replace(/[^0-9.]/g,"");
       var extra={type:"feed"};
@@ -592,7 +809,7 @@
     app.appendChild(c);
 
     var lc=document.createElement("div"); lc.className="card";
-    lc.innerHTML='<h2>Today\'s entries</h2><p class="note">Each row shows how long baby had been awake beforehand.</p>';
+    lc.innerHTML='<h2>Today\'s entries</h2><p class="note">Each row shows how long '+baby()+' had been awake beforehand.</p>';
     if(!todayLog.length){ var e0=document.createElement("p"); e0.className="note"; e0.textContent="Nothing logged yet today. Tap a button above to start."; lc.appendChild(e0); }
     else{
       var wrap=document.createElement("div"); wrap.className="log";
@@ -808,7 +1025,7 @@
     function row(arr){ return arr.map(esc).join(","); }
 
     var lines=[];
-    lines.push(row(["Date","Time","Type","Amount (fl oz)","Poo colour","Slept until","Sleep length","Awake before","Baby age (days)"]));
+    lines.push(row(["Date","Time","Type","Amount (fl oz)","Poo colour","Slept until","Sleep length","Awake before","Age (days)"]));
 
     var byDay={};
     log.forEach(function(e){
@@ -849,28 +1066,330 @@
     return "\ufeff"+lines.join("\r\n");
   }
 
+  function renderHealth(){
+    app.innerHTML="";
+    var h=document.createElement("div"); h.className="age-hero";
+    h.innerHTML='<div class="stage">HEALTH</div><div class="big">'+Babys()+' record</div>';
+    app.appendChild(h);
+
+    var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
+    app.appendChild(sb); paintSync();
+
+    var H=healthState();
+    var days=ageDays(get(K_BIRTH));
+
+    // ---- growth ----
+    var gc=document.createElement("div"); gc.className="card";
+    gc.innerHTML='<h2>Weight & length</h2><p class="note">Add a reading after each check-up. Your pediatrician tracks the percentile curves — this is just so you have the numbers to hand.</p>';
+
+    var gb=document.createElement("button"); gb.className="btn btn-primary"; gb.textContent="+ Add measurement";
+    gb.onclick=function(){
+      var w=prompt("Weight in pounds and ounces\n\nExample: 8 4  (for 8lb 4oz)\nLeave blank to skip.","");
+      if(w===null) return;
+      var kg=null;
+      var wm=w.trim().match(/^(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs)?)?\s*(\d+(?:\.\d+)?)?/);
+      if(wm&&wm[1]!==undefined&&w.trim()!==""){
+        var lb=parseFloat(wm[1]), oz=wm[2]!==undefined?parseFloat(wm[2]):0;
+        if(!isNaN(lb)) kg=(lb+oz/16)/2.20462;
+      }
+      var l=prompt("Length in inches\n\nLeave blank to skip.","");
+      if(l===null) return;
+      var cm=null;
+      var lv=parseFloat(String(l).trim().replace(/[^0-9.]/g,""));
+      if(!isNaN(lv)&&lv>0) cm=lv*2.54;
+      if(kg==null&&cm==null) return;
+      H.growth.push({id:uid(),t:Date.now(),day:todayKey(),ageDays:days,kg:kg,cm:cm});
+      saveHealth(H); renderHealth();
+    };
+    gc.appendChild(gb);
+
+    if(H.growth.length){
+      var gl=document.createElement("div"); gl.style.marginTop="12px";
+      H.growth.slice().sort(function(a,b){return b.t-a.t;}).forEach(function(m){
+        var r=document.createElement("div"); r.className="logrow";
+        var left=document.createElement("div");
+        var bits=[];
+        if(m.kg) bits.push(lbOz(m.kg));
+        if(m.cm) bits.push(inches(m.cm));
+        left.innerHTML='<div style="font-weight:800">'+bits.join("  ·  ")+'</div>'+
+          '<div class="hsub">'+m.day+' · '+ageText(m.ageDays)+'</div>';
+        var del=document.createElement("span"); del.className="del"; del.textContent="remove";
+        del.onclick=function(){
+          if(!confirm("Remove this measurement?")) return;
+          H.growth=H.growth.filter(function(x){return x.id!==m.id;});
+          saveHealth(H); renderHealth();
+        };
+        r.appendChild(left); r.appendChild(del); gl.appendChild(r);
+      });
+      gc.appendChild(gl);
+    }
+    app.appendChild(gc);
+
+    // ---- temperature ----
+    var tc=document.createElement("div"); tc.className="card";
+    tc.innerHTML='<h2>Temperature</h2>'+
+      '<p class="note">Under 3 months, 100.4°F (38°C) or higher is a medical emergency — call your pediatrician or go straight to the ER, and don\'t give fever medicine first.</p>';
+
+    var tb=document.createElement("button"); tb.className="btn btn-primary"; tb.textContent="+ Add reading";
+    tb.onclick=function(){
+      var v=prompt("Temperature in °F\n\nExample: 98.6","");
+      if(v===null) return;
+      var f=parseFloat(String(v).replace(/[^0-9.]/g,""));
+      if(isNaN(f)||f<80||f>115){ alert("That doesn't look like a °F reading — nothing saved."); return; }
+      var c=(f-32)*5/9;
+      H.temps.push({id:uid(),t:Date.now(),day:todayKey(),c:c});
+      saveHealth(H);
+      if(c>=FEVER_C){
+        alert(f.toFixed(1)+"°F is a fever.\n\n"+(days<90
+          ? "Under 3 months this is an emergency — call your pediatrician now or go to the ER. Don't give fever medicine first."
+          : "Call your pediatrician for advice, and watch for the red flags on the Doctor tab."));
+      }
+      renderHealth();
+    };
+    tc.appendChild(tb);
+
+    if(H.temps.length){
+      var tl=document.createElement("div"); tl.style.marginTop="12px";
+      H.temps.slice().sort(function(a,b){return b.t-a.t;}).slice(0,20).forEach(function(m){
+        var lvl=feverLevel(m.c);
+        var r=document.createElement("div"); r.className="logrow";
+        var left=document.createElement("div");
+        left.innerHTML='<div style="font-weight:800'+(lvl==="fever"?';color:#C0392B':'')+'">'+
+          toF(m.c).toFixed(1)+'°F'+(lvl==="fever"?" — fever":lvl==="low"?" — low":"")+'</div>'+
+          '<div class="hsub">'+m.day+' · '+clock(m.t)+'</div>';
+        var del=document.createElement("span"); del.className="del"; del.textContent="remove";
+        del.onclick=function(){
+          H.temps=H.temps.filter(function(x){return x.id!==m.id;});
+          saveHealth(H); renderHealth();
+        };
+        r.appendChild(left); r.appendChild(del); tl.appendChild(r);
+      });
+      tc.appendChild(tl);
+    }
+    app.appendChild(tc);
+
+    // ---- vaccines ----
+    var S=sched();
+    var vc=document.createElement("div"); vc.className="card";
+    vc.innerHTML='<h2>Vaccinations</h2><p class="note">'+S.note+'</p>';
+
+    var swrow=document.createElement("div"); swrow.className="ranges";
+    [["aap","US (AAP)"],["uk","UK (NHS)"]].forEach(function(o){
+      var b=document.createElement("button"); b.className="range"+(schedKey()===o[0]?" on":"");
+      b.textContent=o[1];
+      b.onclick=function(){ set(K_SCHED,o[0]); renderHealth(); };
+      swrow.appendChild(b);
+    });
+    vc.appendChild(swrow);
+
+    S.visits.forEach(function(v){
+      var due=days>=v.age;
+      var vb=document.createElement("div"); vb.style.marginTop="16px";
+      var allDone=v.items.every(function(it){
+        var k=schedKey()+"|"+v.label+"|"+it;
+        return H.vax[k]&&H.vax[k].on;
+      });
+      vb.innerHTML='<div style="font-weight:800;font-size:15px">'+
+        (allDone?"✅ ":due?"🔔 ":"") + v.label +
+        '</div>'+(due&&!allDone?'<div class="hsub">due now</div>':'');
+
+      v.items.forEach(function(it){
+        var k=schedKey()+"|"+v.label+"|"+it;
+        var rec=H.vax[k]||{};
+        var r=document.createElement("div"); r.className="check"+(rec.on?" done":"");
+        var bx=document.createElement("div"); bx.className="box"+(rec.on?" on":"");
+        var lb=document.createElement("div");
+        lb.innerHTML='<div class="lbl">'+it+'</div>'+
+          (rec.on&&rec.date?'<div class="hsub">given '+rec.date+'</div>':'');
+        r.appendChild(bx); r.appendChild(lb);
+        r.onclick=function(){
+          if(rec.on){ delete H.vax[k]; }
+          else {
+            var d=prompt("Date given (YYYY-MM-DD)\n\nLeave blank for today.", todayKey());
+            if(d===null) return;
+            d=d.trim()||todayKey();
+            H.vax[k]={on:true,at:Date.now(),date:d};
+          }
+          saveHealth(H); renderHealth();
+        };
+        vb.appendChild(r);
+      });
+      vc.appendChild(vb);
+    });
+
+    if(S.seasonal&&S.seasonal.length){
+      var se=document.createElement("div"); se.style.marginTop="18px";
+      se.innerHTML='<div style="font-weight:800;font-size:15px">Seasonal & ongoing</div>';
+      S.seasonal.forEach(function(s){
+        var p=document.createElement("div"); p.className="hsub"; p.style.marginTop="6px"; p.textContent="• "+s;
+        se.appendChild(p);
+      });
+      vc.appendChild(se);
+    }
+    app.appendChild(vc);
+
+    var nb=document.createElement("div"); nb.className="card";
+    nb.innerHTML='<h2>Worth knowing</h2><p class="note">Since January 2026 the CDC and the AAP publish different US schedules — the CDC moved several vaccines to risk-based or shared decision-making, while the AAP kept them as routine. Most pediatricians and over 230 medical organisations follow the AAP one. Ask your pediatrician which they use, and check the current guidance rather than relying on this list alone.</p>';
+    app.appendChild(nb);
+
+    disclaimer();
+  }
+
+  // NHS-style developmental guide. Grouped by the ages where you'd typically
+  // start noticing each thing. These are ranges, not deadlines - the whole
+  // point is that babies vary enormously and most "late" is still normal.
+  var MILESTONES=[
+    {age:0, label:"First few weeks", items:[
+      ["Grasps your finger when you touch their palm","reflex, present from birth"],
+      ["Startles at sudden loud noises","the Moro reflex"],
+      ["Turns towards your voice","already knows it from pregnancy"],
+      ["Focuses on your face when close","about 20–30cm away"]
+    ]},
+    {age:28, label:"Around 4–6 weeks", items:[
+      ["First real smile at you","not wind — a proper social smile"],
+      ["Follows a face or object with their eyes",""],
+      ["Makes small cooing sounds",""],
+      ["Lifts head briefly during tummy time",""]
+    ]},
+    {age:56, label:"Around 2 months", items:[
+      ["Holds head steadier when upright",""],
+      ["Watches your face intently while you talk",""],
+      ["Different cries for different needs",""],
+      ["Calms when spoken to or picked up",""]
+    ]},
+    {age:84, label:"Around 3–4 months", items:[
+      ["Pushes up on forearms during tummy time",""],
+      ["Laughs out loud",""],
+      ["Reaches for and bats at objects",""],
+      ["Holds head steady without support",""],
+      ["Brings hands together and to mouth",""]
+    ]},
+    {age:120, label:"Around 4–6 months", items:[
+      ["Rolls over","never leave them on a raised surface now"],
+      ["Grabs objects and brings them to mouth",""],
+      ["Babbles — \u201Cba\u201D, \u201Cda\u201D, \u201Cma\u201D sounds",""],
+      ["Sits with support",""],
+      ["Recognises familiar people from across a room",""]
+    ]},
+    {age:183, label:"Around 6–9 months", items:[
+      ["Sits without support",""],
+      ["Passes objects from one hand to the other",""],
+      ["Responds to their own name",""],
+      ["Starts on solid food","around 6 months"],
+      ["Shows stranger awareness","clinginess is a good sign, not a problem"]
+    ]},
+    {age:274, label:"Around 9–12 months", items:[
+      ["Crawls, bum-shuffles, or commando-crawls","all are normal, some babies skip crawling"],
+      ["Pulls to stand holding furniture",""],
+      ["Pincer grip — picks things up with finger and thumb",""],
+      ["Waves bye-bye or claps",""],
+      ["Says \u201Cmama\u201D or \u201Cdada\u201D with meaning",""],
+      ["Understands \u201Cno\u201D",""]
+    ]},
+    {age:365, label:"Around 12–18 months", items:[
+      ["Stands alone",""],
+      ["First steps","anywhere from 10 to 18 months is normal"],
+      ["First clear word besides mama/dada",""],
+      ["Points at things they want",""],
+      ["Drinks from a cup",""],
+      ["Follows a simple instruction",""]
+    ]}
+  ];
+
+  // Things the NHS flags as worth raising - not emergencies, but worth a
+  // conversation at your next check rather than waiting and worrying.
+  var DEV_CONCERNS=[
+    ["By 8 weeks","Not focusing on or following your face with their eyes"],
+    ["By 8 weeks","Not startling at loud sounds"],
+    ["By 3–4 months","Still no smiles at people"],
+    ["By 4 months","Head still very floppy when pulled to sitting"],
+    ["By 6 months","Not reaching for things, or not turning towards sounds"],
+    ["By 12 months","Not babbling, pointing, or making gestures"],
+    ["By 18 months","No words yet, or not walking"],
+    ["Any age","Losing skills they previously had"]
+  ];
+
   function renderMilestones(){
     app.innerHTML="";
     var hero=ageHero(); app.appendChild(hero.el);
     var days=hero.days;
-    var timeline=[
-      ["First days","Sleeps a lot, feeds often, grasps your finger, startles at loud sounds.",0],
-      ["2–4 weeks","Back to birth weight, cord stump falls off, focuses on faces ~20–30cm away.",14],
-      ["6 weeks","First social smiles, more alert, starting to make cooing sounds.",42],
-      ["2 months","Holds head up briefly in tummy time, follows objects, coos & gurgles.",56],
-      ["3 months","Steadier head control, pushes up on arms, laughs, reaches for things.",84],
-      ["4 months","Rolls (watch on raised surfaces!), grabs toys, babbles, very interactive.",120]
-    ];
-    var c=document.createElement("div"); c.className="card";
-    c.innerHTML='<h2>What to expect</h2><p class="note">A rough map — every baby is on their own timeline. These aren\'t deadlines. Your pediatrician tracks real milestones at check-ups.</p>';
-    timeline.forEach(function(m){
-      var reached=days>=m[2];
-      var r=document.createElement("div"); r.className="check"; r.style.cursor="default";
-      r.innerHTML='<div class="box '+(reached?"on":"")+'" style="cursor:default"></div>'+
-        '<div><div class="lbl" style="font-weight:800">'+m[0]+'</div><div class="note" style="margin:2px 0 0">'+m[1]+'</div></div>';
-      c.appendChild(r);
+
+    var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
+    app.appendChild(sb); paintSync();
+
+    var H=healthState();
+    if(!H.miles) H.miles={};
+
+    var intro=document.createElement("div"); intro.className="card";
+    intro.innerHTML='<h2>What '+baby()+' can do</h2>'+
+      '<p class="note">Tick things off as you notice them — this is '+Babys()+' own record, not a test. '+
+      'Babies vary enormously and these are wide ranges, not deadlines. Reaching something late is usually just how that baby is doing it. '+
+      'Your health visitor or pediatrician checks development properly at reviews.</p>';
+
+    var doneCount=0, total=0;
+    MILESTONES.forEach(function(g){ g.items.forEach(function(){ total++; }); });
+    Object.keys(H.miles).forEach(function(k){ if(H.miles[k]&&H.miles[k].on) doneCount++; });
+    if(doneCount){
+      var cb=document.createElement("div"); cb.className="counts";
+      cb.innerHTML='<span class="cbadge">⭐ '+doneCount+' recorded</span>';
+      intro.appendChild(cb);
+    }
+    app.appendChild(intro);
+
+    MILESTONES.forEach(function(g){
+      // show the current stage and everything before it, plus a peek at what's next
+      var isCurrent = days>=g.age && days<g.age+120;
+      var isPast = days>=g.age+120;
+      var isNext = days<g.age && days>g.age-90;
+      if(!isCurrent && !isPast && !isNext) return;
+
+      var c=document.createElement("div"); c.className="card";
+      var tag = isCurrent ? '<span class="pill">around now</span>' : isNext ? '<span class="pill">coming up</span>' : '';
+      c.innerHTML='<h2>'+g.label+' '+tag+'</h2>';
+
+      g.items.forEach(function(it){
+        var k=g.label+"|"+it[0];
+        var rec=H.miles[k]||{};
+        var r=document.createElement("div"); r.className="check"+(rec.on?" done":"");
+        var bx=document.createElement("div"); bx.className="box"+(rec.on?" on":"");
+        var lb=document.createElement("div");
+        lb.innerHTML='<div class="lbl">'+it[0]+'</div>'+
+          (rec.on&&rec.date?'<div class="hsub">first seen '+rec.date+'</div>'
+            : it[1]?'<div class="hsub">'+it[1]+'</div>':'');
+        r.appendChild(bx); r.appendChild(lb);
+        r.onclick=function(){
+          if(rec.on){ delete H.miles[k]; }
+          else {
+            var d=prompt("When did you first see this? (YYYY-MM-DD)\n\nLeave blank for today.", todayKey());
+            if(d===null) return;
+            H.miles[k]={on:true,at:Date.now(),date:(d.trim()||todayKey())};
+          }
+          saveHealth(H); renderMilestones();
+        };
+        c.appendChild(r);
+      });
+      app.appendChild(c);
     });
-    app.appendChild(c);
+
+    // concerns relevant to their age, plus a little either side
+    var rel=DEV_CONCERNS.filter(function(x){
+      if(x[0]==="Any age") return true;
+      var m=x[0].match(/(\d+)\s*(week|month)/);
+      if(!m) return true;
+      var byDays = m[2]==="week" ? +m[1]*7 : +m[1]*30.44;
+      return days >= byDays-30;
+    });
+    if(rel.length){
+      var fc=document.createElement("div"); fc.className="card flag";
+      fc.innerHTML='<h2>Worth mentioning</h2><p class="note" style="color:#8A2820">Not emergencies — but bring these up at your next check-up rather than waiting and worrying.</p>';
+      var ul=document.createElement("ul");
+      rel.forEach(function(x){
+        var li=document.createElement("li"); li.textContent=x[0]+": "+x[1]; ul.appendChild(li);
+      });
+      fc.appendChild(ul);
+      app.appendChild(fc);
+    }
+
     disclaimer();
   }
 
@@ -894,13 +1413,29 @@
 
   function disclaimer(){
     var d=document.createElement("div"); d.className="disc";
-    d.textContent="General information only — not medical advice, diagnosis, or a substitute for your pediatrician. Babies vary; these are typical ranges, not rules. For anything about your baby's health, or whenever you're worried, contact your doctor or emergency services.";
+    d.textContent="General information only — not medical advice, diagnosis, or a substitute for your pediatrician. Babies vary; these are typical ranges, not rules. For anything about "+babys()+" health, or whenever you're worried, contact your doctor or emergency services.";
     app.appendChild(d);
     var reset=document.createElement("div"); reset.style.marginTop="10px";
     reset.style.display="flex"; reset.style.gap="8px"; reset.style.flexWrap="wrap";
     var b=document.createElement("button"); b.className="btn btn-ghost"; b.textContent="Change birth date";
-    b.onclick=function(){ if(confirm("Change your baby's date of birth?")){ localStorage.removeItem(K_BIRTH); render(); } };
+    b.onclick=function(){ if(confirm("Change "+babys()+" date of birth?")){ localStorage.removeItem(K_BIRTH); render(); } };
     reset.appendChild(b);
+    var nb=document.createElement("button"); nb.className="btn btn-ghost"; nb.textContent="Name & pronouns";
+    nb.onclick=function(){
+      var n=prompt("Baby's name\n\nLeave blank to just say \u201Cbaby\u201D.", get(K_NAME)||"");
+      if(n!==null){ n=n.trim(); if(n) set(K_NAME,n); else localStorage.removeItem(K_NAME); }
+      var cur=get(K_SEX)||"";
+      var sxLabel = cur==="girl"?"girl":cur==="boy"?"boy":"not saying";
+      var sx=prompt("Boy or girl? Type: boy, girl, or leave blank for \u201Cthey\u201D.\n\nCurrently: "+sxLabel, cur);
+      if(sx!==null){
+        sx=sx.trim().toLowerCase();
+        if(sx==="boy"||sx==="b"||sx==="m"||sx==="male") set(K_SEX,"boy");
+        else if(sx==="girl"||sx==="g"||sx==="f"||sx==="female") set(K_SEX,"girl");
+        else localStorage.removeItem(K_SEX);
+      }
+      render();
+    };
+    reset.appendChild(nb);
     var kb=document.createElement("button"); kb.className="btn btn-ghost"; kb.textContent="Sharing passcode";
     kb.onclick=function(){
       var v=prompt("Sharing passcode — the same on both phones. Leave blank for this phone only.", get(K_KEY)||"");
@@ -912,7 +1447,7 @@
     app.appendChild(reset);
   }
 
-  var TABS=[["today","🏠","Today"],["track","📝","Track"],["history","📊","History"],["schedule","🕐","Schedule"],["flags","🚨","Doctor"]];
+  var TABS=[["today","🏠","Today"],["track","📝","Track"],["history","📊","History"],["health","❤️","Health"],["flags","🚨","Doctor"]];
   function renderTabs(){
     var t=document.getElementById("tabs"); t.innerHTML="";
     if(needsBirth()){ t.style.display="none"; return; } t.style.display="flex";
@@ -930,6 +1465,7 @@
     else if(TAB==="schedule") renderSchedule();
     else if(TAB==="track") renderTrackers();
     else if(TAB==="history") renderHistory();
+    else if(TAB==="health") renderHealth();
     else if(TAB==="milestones") renderMilestones();
     else if(TAB==="flags") renderFlags();
     window.scrollTo(0,0);
