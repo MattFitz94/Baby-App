@@ -96,6 +96,31 @@
   .syncbar.err{background:var(--redSoft);color:#8A2820;}
   .syncbar.off{background:#EFEAE0;color:var(--muted);}
 
+  /* feeding guide rows */
+  .guiderow{padding:10px 0;border-bottom:1px solid var(--line);}
+  .guiderow:last-child{border-bottom:none;}
+  .guiderow.now{background:var(--amberSoft);border-radius:12px;padding:12px;border-bottom:none;margin:4px 0;}
+  .gr-age{font-weight:800;font-size:14px;}
+  .gr-main{font-weight:700;font-size:14px;color:var(--amberDeep);margin:2px 0;}
+
+  /* collapsible panels */
+  .panel{padding:0;overflow:hidden;}
+  .panelhead{width:100%;background:none;border:none;font-family:inherit;cursor:pointer;
+    display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;text-align:left;}
+  .ph-title{font-family:'Fraunces',serif;font-size:17px;font-weight:600;color:var(--ink);}
+  .ph-chev{font-size:15px;color:var(--muted);flex-shrink:0;}
+  .panelbody{padding:0 18px 16px;}
+
+  /* tap picker */
+  .pickcol{max-height:56vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    border:1px solid var(--line);border-radius:14px;}
+  .pickitem{display:block;width:100%;background:#fff;border:none;border-bottom:1px solid var(--line);
+    font-family:'Fraunces',serif;font-size:20px;font-weight:600;color:var(--ink);
+    padding:15px 16px;text-align:left;cursor:pointer;}
+  .pickitem:last-child{border-bottom:none;}
+  .pickitem:active{background:var(--amberSoft);}
+  .pickhint{font-family:'Inter',system-ui,sans-serif;font-size:12px;font-weight:600;color:var(--muted);margin-left:8px;}
+
   /* feed amount picker */
   .ozgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
   .ozbtn{border:1px solid var(--line);background:#fff;border-radius:12px;padding:14px 4px;
@@ -635,38 +660,127 @@
     disclaimer();
   }
 
+  // Formula amounts by age — a rough planning guide, not a target. Based on the
+  // standard ~2.5 oz per lb of body weight per day, capped near 32 oz, mapped
+  // to typical weights at each age. Breastfed feeds don't follow this.
+  var FEED_GUIDE=[
+    ["First week","1–2 oz per feed","8–12 feeds a day","Tiny tummy — small and frequent is normal. Don't force the amount."],
+    ["Weeks 1–2","2–3 oz per feed","8–10 feeds a day","Roughly 14–20 oz across the day."],
+    ["Weeks 2–4","3–4 oz per feed","7–8 feeds a day","Roughly 18–24 oz across the day."],
+    ["1–2 months","4–5 oz per feed","6–7 feeds a day","Roughly 24–30 oz across the day."],
+    ["2–4 months","4–6 oz per feed","5–6 feeds a day","Around 24–32 oz — most babies settle near a daily total here."],
+    ["4–6 months","6–7 oz per feed","4–5 feeds a day","Up to about 32 oz a day, which is the usual daily ceiling."],
+    ["6+ months","6–8 oz per feed","3–4 feeds + solids","Milk stays the main nutrition; solids are on top, not instead, until 12 months."]
+  ];
+
   function renderSchedule(){
     app.innerHTML="";
     var hero=ageHero(); app.appendChild(hero.el);
     var g=hero.g;
-    function block(title,note,rows){
-      var c=document.createElement("div"); c.className="card";
-      c.innerHTML='<h2>'+title+'</h2>'+(note?'<p class="note">'+note+'</p>':'');
-      rows.forEach(function(r){ var d=document.createElement("div"); d.className="row";
-        d.innerHTML='<div class="k">'+r[0]+'</div><div class="v">'+r[1]+'</div>'; c.appendChild(d); });
-      app.appendChild(c);
+
+    function rows(list){
+      var wrap=document.createElement("div");
+      list.forEach(function(r){ var d=document.createElement("div"); d.className="row";
+        d.innerHTML='<div class="k">'+r[0]+'</div><div class="v">'+r[1]+'</div>'; wrap.appendChild(d); });
+      return wrap;
     }
-    block("Feeding","Combination feeding — breast and bottle both count toward these totals.",[
-      ["How often",g.feed],["Cues","Rooting, hands to mouth, smacking lips, fussing. Crying is a late sign."],
-      ["Combo tip","If topping up with formula after nursing, offer the breast first so supply stays up."]
-    ]);
-    block("Formula — ready to feed","Kendamil ready-to-feed. It's sterile in the sealed carton, so no making up or cooling needed — but once it's open the clock starts.",[
-      ["Before opening","Store the carton at room temperature. Shake well. No need to boil water or sterilise anything for the liquid itself — bottles and teats still need sterilising."],
-      ["Once opened","Cover and refrigerate. Use within 24 hours, then bin whatever's left."],
-      ["Warming","Stand the bottle in warm water. Never microwave — it heats unevenly and can scald. Body temperature is plenty; cold from the fridge is also fine if "+baby()+" takes it."],
-      ["Out of the fridge","Once warmed or poured, use within 2 hours. If it's been sitting out longer than that, throw it away."],
-      ["After a feed","Discard anything left in the bottle within 1 hour — saliva gets in and bacteria grow. Don't save it for later."],
-      ["How much","Follow "+babys()+" cues rather than a number: offer, let "+P().them+" stop when "+P().theyre+" done, and don't push the last bit. Your health visitor or pediatrician will tell you the right volumes for "+babys()+" weight and how it splits with breastfeeding — that's worth asking at your next check."],
-      ["Kendamil note","It's a whole-milk formula, so it looks and smells creamier than many others. Stools may change colour or consistency when starting or switching — usually normal, but mention it if you're unsure."]
-    ]);
-    block("Sleep & wake",null,[
-      ["Wake window",g.wake],["Total sleep",g.sleep],
-      ["Safe sleep","On "+P().their+" back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
-    ]);
-    block("Nappies",null,[
-      ["Expect",g.nappies],["Watch","Fewer than 6 wet a day, or very dark strong urine, is worth a call."]
-    ]);
+
+    app.appendChild(panel("sch-feed","Feeding", "around now", true, function(body){
+      body.appendChild(rows([
+        ["How often",g.feed],
+        ["Cues","Rooting, hands to mouth, smacking lips, fussing. Crying is a late sign."],
+        ["Combo tip","If topping up with formula after nursing, offer the breast first so supply stays up."]
+      ]));
+    }));
+
+    app.appendChild(panel("sch-amounts","How much formula, by age", null, false, function(body){
+      var note=document.createElement("p"); note.className="note";
+      note.innerHTML="A rough planning guide for <b>formula</b> — every baby differs, so follow "+babys()+" cues over any number. A breastfed baby self-regulates at the breast and doesn't follow this; combination feeding sits somewhere between. The general rule is about 2.5 oz per pound of body weight per day, up to around 32 oz.";
+      body.appendChild(note);
+      var nowIdx=-1, d=ageDays(get(K_BIRTH));
+      var bounds=[7,14,28,61,122,183,99999];
+      for(var i=0;i<bounds.length;i++){ if(d<bounds[i]){ nowIdx=i; break; } }
+      FEED_GUIDE.forEach(function(r,i){
+        var box=document.createElement("div"); box.className="guiderow"+(i===nowIdx?" now":"");
+        box.innerHTML='<div class="gr-age">'+r[0]+(i===nowIdx?' <span class="pill">around now</span>':'')+'</div>'+
+          '<div class="gr-main">'+r[1]+' · '+r[2]+'</div>'+
+          '<div class="hsub">'+r[3]+'</div>';
+        body.appendChild(box);
+      });
+    }));
+
+    app.appendChild(panel("sch-formula","Kendamil ready-to-feed — handling", null, false, function(body){
+      body.appendChild(rows([
+        ["Before opening","Store at room temperature. Shake well. No making up or cooling needed — but bottles and teats still need sterilising."],
+        ["Once opened","Cover and refrigerate. Use within 24 hours, then bin whatever's left."],
+        ["Warming","Stand the bottle in warm water. Never microwave — it heats unevenly and can scald. Cold from the fridge is fine if "+baby()+" takes it."],
+        ["Out of the fridge","Once warmed or poured, use within 2 hours."],
+        ["After a feed","Discard anything left in the bottle within 1 hour."],
+        ["Kendamil note","A whole-milk formula, so creamier-looking than many. Stools may change when starting or switching — usually normal, mention it if unsure."]
+      ]));
+    }));
+
+    app.appendChild(panel("sch-sleep","Sleep & wake", null, false, function(body){
+      body.appendChild(rows([
+        ["Wake window",g.wake],["Total sleep",g.sleep],
+        ["Safe sleep","On "+P().their+" back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
+      ]));
+    }));
+
+    app.appendChild(panel("sch-nappies","Nappies", null, false, function(body){
+      body.appendChild(rows([
+        ["Expect",g.nappies],["Watch","Fewer than 6 wet a day, or very dark strong urine, is worth a call."]
+      ]));
+    }));
+
     disclaimer();
+  }
+
+  // ---------- shared UI: collapsible cards ----------
+  // Remembers open/closed per card id within the session so opening one thing
+  // and moving on doesn't reset the rest.
+  var PANELS={};
+  function panel(id, title, tag, openByDefault, build){
+    var c=document.createElement("div"); c.className="card panel";
+    var head=document.createElement("button"); head.className="panelhead"; head.type="button";
+    var open = PANELS[id]!==undefined ? PANELS[id] : !!openByDefault;
+    head.innerHTML='<span class="ph-title">'+title+(tag?' <span class="pill">'+tag+'</span>':'')+'</span>'+
+      '<span class="ph-chev">'+(open?"▾":"▸")+'</span>';
+    var body=document.createElement("div"); body.className="panelbody";
+    if(!open) body.style.display="none";
+    var built=false;
+    function ensure(){ if(!built){ build(body); built=true; } }
+    if(open) ensure();
+    head.onclick=function(){
+      open=!open; PANELS[id]=open;
+      head.querySelector(".ph-chev").textContent=open?"▾":"▸";
+      if(open){ ensure(); body.style.display=""; } else { body.style.display="none"; }
+    };
+    c.appendChild(head); c.appendChild(body);
+    return c;
+  }
+
+  // ---------- shared UI: tap picker ----------
+  // A scrollable column of values, no keyboard. Returns the chosen value.
+  function pickerScreen(opts){
+    // opts: {title, note, values:[{label,value}], onPick, backLabel}
+    app.innerHTML="";
+    var c=document.createElement("div"); c.className="card";
+    c.innerHTML='<h2>'+opts.title+'</h2>'+(opts.note?'<p class="note">'+opts.note+'</p>':'');
+    var wrap=document.createElement("div"); wrap.className="pickcol";
+    opts.values.forEach(function(v){
+      var b=document.createElement("button"); b.className="pickitem"; b.textContent=v.label;
+      if(v.hint){ b.innerHTML=v.label+' <span class="pickhint">'+v.hint+'</span>'; }
+      b.onclick=function(){ opts.onPick(v.value); };
+      wrap.appendChild(b);
+    });
+    c.appendChild(wrap);
+    var cancel=document.createElement("button"); cancel.className="btn btn-ghost"; cancel.style.marginTop="12px";
+    cancel.textContent=opts.backLabel||"Cancel";
+    cancel.onclick=opts.onCancel||function(){ renderHealth(); };
+    c.appendChild(cancel);
+    app.appendChild(c);
+    window.scrollTo(0,0);
   }
 
   // Volumes are entered and shown in fl oz but stored in ml, so the numbers
@@ -1136,28 +1250,16 @@
 
     // ---- growth ----
     var gc=document.createElement("div"); gc.className="card";
-    gc.innerHTML='<h2>Weight & length</h2><p class="note">Add a reading after each check-up. Your pediatrician tracks the percentile curves — this is just so you have the numbers to hand.</p>';
+    gc.innerHTML='<h2>Weight & length</h2><p class="note">Add a reading after each check-up — no typing, just tap the numbers. Your pediatrician tracks the percentile curves; this is so you have them to hand.</p>';
 
-    var gb=document.createElement("button"); gb.className="btn btn-primary"; gb.textContent="+ Add measurement";
-    gb.onclick=function(){
-      var w=prompt("Weight in pounds and ounces\n\nExample: 8 4  (for 8lb 4oz)\nLeave blank to skip.","");
-      if(w===null) return;
-      var kg=null;
-      var wm=w.trim().match(/^(\d+(?:\.\d+)?)(?:\s*(?:lb|lbs)?)?\s*(\d+(?:\.\d+)?)?/);
-      if(wm&&wm[1]!==undefined&&w.trim()!==""){
-        var lb=parseFloat(wm[1]), oz=wm[2]!==undefined?parseFloat(wm[2]):0;
-        if(!isNaN(lb)) kg=(lb+oz/16)/2.20462;
-      }
-      var l=prompt("Length in inches\n\nLeave blank to skip.","");
-      if(l===null) return;
-      var cm=null;
-      var lv=parseFloat(String(l).trim().replace(/[^0-9.]/g,""));
-      if(!isNaN(lv)&&lv>0) cm=lv*2.54;
-      if(kg==null&&cm==null) return;
-      H.growth.push({id:uid(),t:Date.now(),day:todayKey(),ageDays:days,kg:kg,cm:cm});
-      saveHealth(H); renderHealth();
-    };
-    gc.appendChild(gb);
+    var grow=document.createElement("div"); grow.style.display="flex"; grow.style.gap="8px"; grow.style.flexWrap="wrap";
+    var wbtn=document.createElement("button"); wbtn.className="btn btn-primary"; wbtn.style.flex="1"; wbtn.textContent="⚖️ Add weight";
+    wbtn.onclick=function(){ pickWeight(days); };
+    grow.appendChild(wbtn);
+    var lbtn=document.createElement("button"); lbtn.className="btn btn-primary"; lbtn.style.flex="1"; lbtn.textContent="📏 Add length";
+    lbtn.onclick=function(){ pickLength(days); };
+    grow.appendChild(lbtn);
+    gc.appendChild(grow);
 
     if(H.growth.length){
       var gl=document.createElement("div"); gl.style.marginTop="12px";
@@ -1184,27 +1286,14 @@
     // ---- temperature ----
     var tc=document.createElement("div"); tc.className="card";
     tc.innerHTML='<h2>Temperature</h2>'+
-      '<p class="note">Under 3 months, 100.4°F (38°C) or higher is a medical emergency — call your pediatrician or go straight to the ER, and don\'t give fever medicine first.</p>';
+      '<p class="note">Tap to add a reading — no typing. Under 3 months, 100.4°F (38°C) or higher is a medical emergency: call your pediatrician or go straight to the ER, and don\'t give fever medicine first.</p>';
 
-    var tb=document.createElement("button"); tb.className="btn btn-primary"; tb.textContent="+ Add reading";
-    tb.onclick=function(){
-      var v=prompt("Temperature in °F\n\nExample: 98.6","");
-      if(v===null) return;
-      var f=parseFloat(String(v).replace(/[^0-9.]/g,""));
-      if(isNaN(f)||f<80||f>115){ alert("That doesn't look like a °F reading — nothing saved."); return; }
-      var c=(f-32)*5/9;
-      H.temps.push({id:uid(),t:Date.now(),day:todayKey(),c:c});
-      saveHealth(H);
-      if(c>=FEVER_C){
-        alert(f.toFixed(1)+"°F is a fever.\n\n"+(days<90
-          ? "Under 3 months this is an emergency — call your pediatrician now or go to the ER. Don't give fever medicine first."
-          : "Call your pediatrician for advice, and watch for the red flags on the Doctor tab."));
-      }
-      renderHealth();
-    };
+    var tb=document.createElement("button"); tb.className="btn btn-primary"; tb.textContent="🌡️ Add temperature";
+    tb.onclick=function(){ pickTemp(days); };
     tc.appendChild(tb);
 
     if(H.temps.length){
+      var lastT=H.temps.slice().sort(function(a,b){return b.t-a.t;})[0];
       var tl=document.createElement("div"); tl.style.marginTop="12px";
       H.temps.slice().sort(function(a,b){return b.t-a.t;}).slice(0,20).forEach(function(m){
         var lvl=feverLevel(m.c);
@@ -1365,6 +1454,83 @@
     ["Any age","Losing skills they previously had"]
   ];
 
+  // ---- health pickers (no typing) ----
+  function pickWeight(days){
+    var vals=[];
+    for(var lb=4; lb<=35; lb++) vals.push({label:lb+" lb", value:lb});
+    pickerScreen({
+      title:"Weight — pounds",
+      note:"Tap the pounds, then the ounces.",
+      values:vals,
+      onPick:function(lb){ pickWeightOz(days, lb); }
+    });
+  }
+  function pickWeightOz(days, lb){
+    var vals=[];
+    for(var oz=0; oz<16; oz++) vals.push({label:lb+" lb "+oz+" oz", value:oz});
+    pickerScreen({
+      title:"Weight — ounces",
+      note:lb+" lb and…",
+      backLabel:"◂ Back to pounds",
+      onCancel:function(){ pickWeight(days); },
+      values:vals,
+      onPick:function(oz){
+        var kg=(lb+oz/16)/2.20462;
+        var H=healthState();
+        H.growth.push({id:uid(),t:Date.now(),day:todayKey(),ageDays:days,kg:kg,cm:null});
+        saveHealth(H); renderHealth();
+      }
+    });
+  }
+  function pickLength(days){
+    var vals=[];
+    // 14.0 to 40.0 inches in half-inch steps
+    for(var i=28; i<=80; i++){
+      var inch=i/2;
+      vals.push({label:(inch%1===0?inch+'.0':inch)+' in', value:inch});
+    }
+    pickerScreen({
+      title:"Length — inches",
+      note:"Tap the closest half-inch.",
+      values:vals,
+      onPick:function(inch){
+        var H=healthState();
+        H.growth.push({id:uid(),t:Date.now(),day:todayKey(),ageDays:days,kg:null,cm:inch*2.54});
+        saveHealth(H); renderHealth();
+      }
+    });
+  }
+  function pickTemp(days){
+    var vals=[];
+    // 95.0 to 105.0 F in 0.1 steps, warmest at top so a fever is the first thing you see
+    for(var t=1050; t>=950; t--){
+      var f=t/10;
+      var isFever=f>=100.4;
+      vals.push({
+        label:f.toFixed(1)+"°F",
+        hint:isFever?"fever":(f<=96.8?"low":""),
+        value:f
+      });
+    }
+    pickerScreen({
+      title:"Temperature",
+      note:"Tap the reading. 100.4°F and above is a fever.",
+      values:vals,
+      onPick:function(f){
+        var c=(f-32)*5/9;
+        var H=healthState();
+        H.temps.push({id:uid(),t:Date.now(),day:todayKey(),c:c});
+        saveHealth(H);
+        if(f>=100.4){
+          alert(f.toFixed(1)+"°F is a fever.\n\n"+(days<90
+            ? "Under 3 months this is an emergency — call your pediatrician now or go to the ER. Don't give fever medicine first."
+            : "Call your pediatrician for advice, and watch for the red flags on the Doctor tab."));
+        }
+        renderHealth();
+      }
+    });
+  }
+
   function renderMilestones(){
     app.innerHTML="";
     var hero=ageHero(); app.appendChild(hero.el);
@@ -1399,32 +1565,30 @@
       var isNext = days<g.age && days>g.age-90;
       if(!isCurrent && !isPast && !isNext) return;
 
-      var c=document.createElement("div"); c.className="card";
-      var tag = isCurrent ? '<span class="pill">around now</span>' : isNext ? '<span class="pill">coming up</span>' : '';
-      c.innerHTML='<h2>'+g.label+' '+tag+'</h2>';
-
-      g.items.forEach(function(it){
-        var k=g.label+"|"+it[0];
-        var rec=H.miles[k]||{};
-        var r=document.createElement("div"); r.className="check"+(rec.on?" done":"");
-        var bx=document.createElement("div"); bx.className="box"+(rec.on?" on":"");
-        var lb=document.createElement("div");
-        lb.innerHTML='<div class="lbl">'+it[0]+'</div>'+
-          (rec.on&&rec.date?'<div class="hsub">first seen '+rec.date+'</div>'
-            : it[1]?'<div class="hsub">'+it[1]+'</div>':'');
-        r.appendChild(bx); r.appendChild(lb);
-        r.onclick=function(){
-          if(rec.on){ delete H.miles[k]; }
-          else {
-            var d=prompt("When did you first see this? (YYYY-MM-DD)\n\nLeave blank for today.", todayKey());
-            if(d===null) return;
-            H.miles[k]={on:true,at:Date.now(),date:(d.trim()||todayKey())};
-          }
-          saveHealth(H); renderMilestones();
-        };
-        c.appendChild(r);
-      });
-      app.appendChild(c);
+      var tag = isCurrent ? 'around now' : isNext ? 'coming up' : '';
+      app.appendChild(panel("ms-"+g.age, g.label, tag, isCurrent, function(body){
+        g.items.forEach(function(it){
+          var k=g.label+"|"+it[0];
+          var rec=H.miles[k]||{};
+          var r=document.createElement("div"); r.className="check"+(rec.on?" done":"");
+          var bx=document.createElement("div"); bx.className="box"+(rec.on?" on":"");
+          var lb=document.createElement("div");
+          lb.innerHTML='<div class="lbl">'+it[0]+'</div>'+
+            (rec.on&&rec.date?'<div class="hsub">first seen '+rec.date+'</div>'
+              : it[1]?'<div class="hsub">'+it[1]+'</div>':'');
+          r.appendChild(bx); r.appendChild(lb);
+          r.onclick=function(){
+            if(rec.on){ delete H.miles[k]; }
+            else {
+              var d=prompt("When did you first see this? (YYYY-MM-DD)\n\nLeave blank for today.", todayKey());
+              if(d===null) return;
+              H.miles[k]={on:true,at:Date.now(),date:(d.trim()||todayKey())};
+            }
+            saveHealth(H); renderMilestones();
+          };
+          body.appendChild(r);
+        });
+      }));
     });
 
     // concerns relevant to their age, plus a little either side
