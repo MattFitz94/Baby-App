@@ -96,6 +96,14 @@
   .syncbar.err{background:var(--redSoft);color:#8A2820;}
   .syncbar.off{background:#EFEAE0;color:var(--muted);}
 
+  .sectlabel{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;color:var(--muted);margin:18px 2px 8px;}
+  .tbtn.note{background:#EEF1F5;color:#3A4A5A;}
+  .overlay{position:fixed;inset:0;background:rgba(30,25,20,0.45);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50;}
+  .overcard{background:#fff;border-radius:20px;padding:20px;width:100%;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);}
+  .overcard h2{margin:0 0 8px;font-family:'Fraunces',serif;font-size:20px;}
+  .noteinput,.dateinput{width:100%;border:1px solid var(--line);border-radius:12px;padding:12px;font-family:inherit;font-size:16px;box-sizing:border-box;}
+  .noteinput{resize:vertical;}
+
   /* feeding guide rows */
   .guiderow{padding:10px 0;border-bottom:1px solid var(--line);}
   .guiderow:last-child{border-bottom:none;}
@@ -647,15 +655,17 @@
     });
     app.appendChild(cl);
 
-    // growth moved here so the bottom bar stays at five tabs
-    var gl=document.createElement("div"); gl.style.marginTop="4px";
-    gl.style.display="flex"; gl.style.gap="8px"; gl.style.flexWrap="wrap";
-    var sbtn=document.createElement("button"); sbtn.className="btn btn-ghost"; sbtn.textContent="🕐 Feeding & sleep guide";
-    sbtn.onclick=function(){ TAB="schedule"; renderTabs(); render(); };
-    gl.appendChild(sbtn);
-    var gb=document.createElement("button"); gb.className="btn btn-ghost"; gb.textContent="⭐ What "+baby()+" can do";
-    gb.onclick=function(){ TAB="milestones"; renderTabs(); render(); };
-    gl.appendChild(gb); app.appendChild(gl);
+    // ---- feeding & sleep guide, inline and collapsed ----
+    var gsect=document.createElement("div");
+    var gh=document.createElement("div"); gh.className="sectlabel"; gh.textContent="Guides";
+    gsect.appendChild(gh);
+    buildSchedulecards(gsect, false);
+    app.appendChild(gsect);
+
+    // ---- what baby can do, inline ----
+    var msect=document.createElement("div");
+    buildMilestonePanels(msect, false);
+    app.appendChild(msect);
 
     disclaimer();
   }
@@ -673,10 +683,9 @@
     ["6+ months","6–8 oz per feed","3–4 feeds + solids","Milk stays the main nutrition; solids are on top, not instead, until 12 months."]
   ];
 
-  function renderSchedule(){
-    app.innerHTML="";
-    var hero=ageHero(); app.appendChild(hero.el);
-    var g=hero.g;
+  function buildSchedulecards(target, feedOpen){
+    var g=guidance(ageDays(get(K_BIRTH)));
+    var pre = target===app ? "sch" : "t-sch";
 
     function rows(list){
       var wrap=document.createElement("div");
@@ -685,7 +694,7 @@
       return wrap;
     }
 
-    app.appendChild(panel("sch-feed","Feeding", "around now", true, function(body){
+    target.appendChild(panel(pre+"-feed","Feeding", "around now", feedOpen, function(body){
       body.appendChild(rows([
         ["How often",g.feed],
         ["Cues","Rooting, hands to mouth, smacking lips, fussing. Crying is a late sign."],
@@ -693,7 +702,7 @@
       ]));
     }));
 
-    app.appendChild(panel("sch-amounts","How much formula, by age", null, false, function(body){
+    target.appendChild(panel(pre+"-amounts","How much formula, by age", null, false, function(body){
       var note=document.createElement("p"); note.className="note";
       note.innerHTML="A rough planning guide for <b>formula</b> — every baby differs, so follow "+babys()+" cues over any number. A breastfed baby self-regulates at the breast and doesn't follow this; combination feeding sits somewhere between. The general rule is about 2.5 oz per pound of body weight per day, up to around 32 oz.";
       body.appendChild(note);
@@ -709,7 +718,7 @@
       });
     }));
 
-    app.appendChild(panel("sch-formula","Kendamil ready-to-feed — handling", null, false, function(body){
+    target.appendChild(panel(pre+"-formula","Kendamil ready-to-feed — handling", null, false, function(body){
       body.appendChild(rows([
         ["Before opening","Store at room temperature. Shake well. No making up or cooling needed — but bottles and teats still need sterilising."],
         ["Once opened","Cover and refrigerate. Use within 24 hours, then bin whatever's left."],
@@ -720,19 +729,24 @@
       ]));
     }));
 
-    app.appendChild(panel("sch-sleep","Sleep & wake", null, false, function(body){
+    target.appendChild(panel(pre+"-sleep","Sleep & wake", null, false, function(body){
       body.appendChild(rows([
         ["Wake window",g.wake],["Total sleep",g.sleep],
         ["Safe sleep","On "+P().their+" back, firm flat surface, no pillows, bumpers, or loose bedding. Room-share without bed-sharing."]
       ]));
     }));
 
-    app.appendChild(panel("sch-nappies","Nappies", null, false, function(body){
+    target.appendChild(panel(pre+"-nappies","Nappies", null, false, function(body){
       body.appendChild(rows([
         ["Expect",g.nappies],["Watch","Fewer than 6 wet a day, or very dark strong urine, is worth a call."]
       ]));
     }));
+  }
 
+  function renderSchedule(){
+    app.innerHTML="";
+    var hero=ageHero(); app.appendChild(hero.el);
+    buildSchedulecards(app, true);
     disclaimer();
   }
 
@@ -922,6 +936,11 @@
     };
     grid.appendChild(slb);
 
+    // note - free text, stamped with the current date and time automatically
+    var ntb=document.createElement("button"); ntb.className="tbtn note"; ntb.textContent="📝 Note";
+    ntb.onclick=function(){ askNote(function(text){ if(text) addEntry({type:"note",text:text}); }); };
+    grid.appendChild(ntb);
+
     c.appendChild(grid);
     app.appendChild(c);
 
@@ -930,7 +949,7 @@
     if(!todayLog.length){ var e0=document.createElement("p"); e0.className="note"; e0.textContent="Nothing logged yet today. Tap a button above to start."; lc.appendChild(e0); }
     else{
       var wrap=document.createElement("div"); wrap.className="log";
-      var icons={feed:"🍼 Feed",wet:"💧 Wet nappy",dirty:"💩 Dirty nappy",sleep:"😴 Sleep"};
+      var icons={feed:"🍼 Feed",wet:"💧 Wet nappy",dirty:"💩 Dirty nappy",sleep:"😴 Sleep",note:"📝 Note"};
       todayLog.slice().sort(function(a,b){return b.t-a.t;}).forEach(function(e){
         var r=document.createElement("div"); r.className="logrow";
         var left=document.createElement("div");
@@ -942,15 +961,16 @@
         }
 
         var bits=[];
+        if(e.type==="note" && e.text){ bits.push(esc(e.text)); }
         if(e.colour){
           var pi=pooInfo(e.colour);
           if(pi) bits.push(pi[1]);
         }
         var woke=awakeSince(log, e.t);
-        if(woke && e.t>woke) bits.push("awake "+durText(e.t-woke));
+        if(e.type!=="note" && woke && e.t>woke) bits.push("awake "+durText(e.t-woke));
 
         left.innerHTML='<div>'+main+'</div>'+
-          (bits.length?'<div class="hsub">'+bits.join(" · ")+'</div>':'');
+          (bits.length?'<div class="hsub"'+(e.type==="note"?' style="white-space:pre-wrap"':'')+'>'+bits.join(" · ")+'</div>':'');
 
         var del=document.createElement("span"); del.className="del"; del.textContent="remove";
         del.onclick=function(){ var i=log.indexOf(e); if(i>=0){ log.splice(i,1); setJSON(K_LOG,log);
@@ -962,6 +982,35 @@
     }
     app.appendChild(lc);
     disclaimer();
+  }
+
+  function esc(s){
+    return String(s).replace(/[&<>"]/g,function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c];
+    });
+  }
+
+  // Free-text note. The text is typed, but the date and time are captured
+  // automatically the moment it's saved — no picking a time.
+  function askNote(done){
+    var ov=document.createElement("div"); ov.className="overlay";
+    var card=document.createElement("div"); card.className="overcard";
+    card.innerHTML='<h2>Add a note</h2><p class="note" style="margin:0 0 10px">Stamped with the time and date right now: '+
+      clock(Date.now())+' · '+new Date().toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})+'.</p>';
+    var ta=document.createElement("textarea"); ta.className="noteinput"; ta.rows=4;
+    ta.setAttribute("placeholder","e.g. Seemed extra sleepy today, or a bit of a rash on cheek");
+    card.appendChild(ta);
+    var row=document.createElement("div"); row.style.display="flex"; row.style.gap="8px"; row.style.marginTop="12px";
+    var ok=document.createElement("button"); ok.className="btn btn-primary"; ok.style.flex="1"; ok.textContent="Save note";
+    ok.onclick=function(){ var v=ta.value.trim(); document.body.removeChild(ov); done(v||null); };
+    var no=document.createElement("button"); no.className="btn btn-ghost"; no.textContent="Cancel";
+    no.onclick=function(){ document.body.removeChild(ov); };
+    row.appendChild(ok); row.appendChild(no);
+    card.appendChild(row);
+    ov.appendChild(card);
+    ov.onclick=function(e){ if(e.target===ov) document.body.removeChild(ov); };
+    document.body.appendChild(ov);
+    setTimeout(function(){ try{ ta.focus(); }catch(e){} },50);
   }
 
   // Tappable amount picker — easier one-handed at 3am than typing a number.
@@ -1184,7 +1233,7 @@
   // Two sheets in one file would need a real spreadsheet format, so the CSV
   // gives the per-event rows plus a daily summary block underneath.
   function buildCSV(){
-    var names={feed:"Feed",wet:"Wet nappy",dirty:"Dirty nappy",sleep:"Sleep"};
+    var names={feed:"Feed",wet:"Wet nappy",dirty:"Dirty nappy",sleep:"Sleep",note:"Note"};
     var log=getJSON(K_LOG,[]).slice().sort(function(a,b){return (a.t||0)-(b.t||0);});
     var birth=get(K_BIRTH);
 
@@ -1195,7 +1244,7 @@
     function row(arr){ return arr.map(esc).join(","); }
 
     var lines=[];
-    lines.push(row(["Date","Time","Type","Amount (fl oz)","Poo colour","Slept until","Sleep length","Awake before","Age (days)"]));
+    lines.push(row(["Date","Time","Type","Amount (fl oz)","Poo colour","Slept until","Sleep length","Awake before","Note","Age (days)"]));
 
     var byDay={};
     log.forEach(function(e){
@@ -1211,6 +1260,7 @@
         (e.type==="sleep"&&e.end) ? clock(e.end) : "",
         (e.type==="sleep"&&e.end) ? durText(e.end-e.t) : "",
         (woke && e.t>woke) ? durText(e.t-woke) : "",
+        e.type==="note" ? (e.text||"") : "",
         age
       ]));
       if(!byDay[e.day]) byDay[e.day]={feed:0,wet:0,dirty:0,sleep:0,ml:0,sleepMs:0,longest:0};
@@ -1531,42 +1581,23 @@
     });
   }
 
-  function renderMilestones(){
-    app.innerHTML="";
-    var hero=ageHero(); app.appendChild(hero.el);
-    var days=hero.days;
-
-    var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
-    app.appendChild(sb); paintSync();
-
+  function buildMilestonePanels(target, expandCurrent){
     var H=healthState();
     if(!H.miles) H.miles={};
+    var days=ageDays(get(K_BIRTH));
+    var pre = target===app ? "ms" : "t-ms";
 
-    var intro=document.createElement("div"); intro.className="card";
-    intro.innerHTML='<h2>What '+baby()+' can do</h2>'+
-      '<p class="note">Tick things off as you notice them — this is '+Babys()+' own record, not a test. '+
-      'Babies vary enormously and these are wide ranges, not deadlines. Reaching something late is usually just how that baby is doing it. '+
-      'Your health visitor or pediatrician checks development properly at reviews.</p>';
-
-    var doneCount=0, total=0;
-    MILESTONES.forEach(function(g){ g.items.forEach(function(){ total++; }); });
-    Object.keys(H.miles).forEach(function(k){ if(H.miles[k]&&H.miles[k].on) doneCount++; });
-    if(doneCount){
-      var cb=document.createElement("div"); cb.className="counts";
-      cb.innerHTML='<span class="cbadge">⭐ '+doneCount+' recorded</span>';
-      intro.appendChild(cb);
-    }
-    app.appendChild(intro);
+    var lbl=document.createElement("div"); lbl.className="sectlabel"; lbl.textContent="What "+baby()+" can do";
+    target.appendChild(lbl);
 
     MILESTONES.forEach(function(g){
-      // show the current stage and everything before it, plus a peek at what's next
       var isCurrent = days>=g.age && days<g.age+120;
       var isPast = days>=g.age+120;
       var isNext = days<g.age && days>g.age-90;
       if(!isCurrent && !isPast && !isNext) return;
 
       var tag = isCurrent ? 'around now' : isNext ? 'coming up' : '';
-      app.appendChild(panel("ms-"+g.age, g.label, tag, isCurrent, function(body){
+      target.appendChild(panel(pre+"-"+g.age, g.label, tag, expandCurrent && isCurrent, function(body){
         g.items.forEach(function(it){
           var k=g.label+"|"+it[0];
           var rec=H.miles[k]||{};
@@ -1578,20 +1609,74 @@
               : it[1]?'<div class="hsub">'+it[1]+'</div>':'');
           r.appendChild(bx); r.appendChild(lb);
           r.onclick=function(){
-            if(rec.on){ delete H.miles[k]; }
-            else {
-              var d=prompt("When did you first see this? (YYYY-MM-DD)\n\nLeave blank for today.", todayKey());
-              if(d===null) return;
-              H.miles[k]={on:true,at:Date.now(),date:(d.trim()||todayKey())};
+            if(rec.on){
+              delete H.miles[k]; saveHealth(H);
+              if(TAB==="today") renderToday(); else renderMilestones();
+            } else {
+              // calendar picker instead of typing a date
+              pickDate("When did you first see this?", function(dateStr){
+                H.miles[k]={on:true,at:Date.now(),date:dateStr};
+                saveHealth(H);
+                if(TAB==="today") renderToday(); else renderMilestones();
+              }, function(){ /* cancelled */ });
             }
-            saveHealth(H); renderMilestones();
           };
           body.appendChild(r);
         });
       }));
     });
+  }
 
-    // concerns relevant to their age, plus a little either side
+  // A native date picker in a small overlay — no typing, no free text.
+  function pickDate(title, done, cancel){
+    var ov=document.createElement("div"); ov.className="overlay";
+    var card=document.createElement("div"); card.className="overcard";
+    card.innerHTML='<h2>'+title+'</h2>';
+    var inp=document.createElement("input"); inp.type="date";
+    inp.max=todayKey(); inp.value=todayKey();
+    inp.className="dateinput";
+    card.appendChild(inp);
+    var row=document.createElement("div"); row.style.display="flex"; row.style.gap="8px"; row.style.marginTop="14px";
+    var ok=document.createElement("button"); ok.className="btn btn-primary"; ok.style.flex="1"; ok.textContent="Save";
+    ok.onclick=function(){ var v=inp.value||todayKey(); document.body.removeChild(ov); done(v); };
+    var no=document.createElement("button"); no.className="btn btn-ghost"; no.textContent="Cancel";
+    no.onclick=function(){ document.body.removeChild(ov); if(cancel)cancel(); };
+    row.appendChild(ok); row.appendChild(no);
+    card.appendChild(row);
+    ov.appendChild(card);
+    ov.onclick=function(e){ if(e.target===ov){ document.body.removeChild(ov); if(cancel)cancel(); } };
+    document.body.appendChild(ov);
+    setTimeout(function(){ try{ inp.focus(); }catch(e){} },50);
+  }
+
+  function renderMilestones(){
+    app.innerHTML="";
+    var hero=ageHero(); app.appendChild(hero.el);
+
+    var sb=document.createElement("div"); sb.id="syncbar"; sb.className="syncbar";
+    app.appendChild(sb); paintSync();
+
+    var H=healthState();
+    if(!H.miles) H.miles={};
+    var days=ageDays(get(K_BIRTH));
+
+    var intro=document.createElement("div"); intro.className="card";
+    intro.innerHTML='<h2>What '+baby()+' can do</h2>'+
+      '<p class="note">Tick things off as you notice them — this is '+Babys()+' own record, not a test. '+
+      'Babies vary enormously and these are wide ranges, not deadlines. Reaching something late is usually just how that baby is doing it. '+
+      'Your health visitor or pediatrician checks development properly at reviews.</p>';
+    var doneCount=0;
+    Object.keys(H.miles).forEach(function(k){ if(H.miles[k]&&H.miles[k].on) doneCount++; });
+    if(doneCount){
+      var cb=document.createElement("div"); cb.className="counts";
+      cb.innerHTML='<span class="cbadge">⭐ '+doneCount+' recorded</span>';
+      intro.appendChild(cb);
+    }
+    app.appendChild(intro);
+
+    buildMilestonePanels(app, true);
+
+    // concerns relevant to their age
     var rel=DEV_CONCERNS.filter(function(x){
       if(x[0]==="Any age") return true;
       var m=x[0].match(/(\d+)\s*(week|month)/);
