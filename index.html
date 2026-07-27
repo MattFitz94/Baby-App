@@ -237,9 +237,18 @@
     if(!h.miles) h.miles={};
     if(!Array.isArray(h.growth)) h.growth=[];
     if(!Array.isArray(h.temps)) h.temps=[];
+    if(!Array.isArray(h.deleted)) h.deleted=[];
     return h;
   }
   function saveHealth(h){ setJSON(K_HEALTH,h); push(); }
+  // Remove a growth/temp reading and remember the deletion, so the merge on
+  // the next sync doesn't pull it back from the server or the other phone.
+  function deleteHealth(field, id){
+    var h=healthState();
+    h[field]=h[field].filter(function(x){return x.id!==id;});
+    if(h.deleted.indexOf(id)<0) h.deleted.push(id);
+    saveHealth(h);
+  }
 
   function lbOz(kg){
     if(!kg) return "";
@@ -630,30 +639,33 @@
     ac.appendChild(note);
     app.appendChild(ac);
 
-    // today's focus
-    var f=document.createElement("div"); f.className="card";
-    f.innerHTML='<h2>What to focus on now</h2><p class="note">Key things for '+babys()+' current stage.</p>';
-    g.focus.forEach(function(item){ var p=document.createElement("div"); p.className="check"; p.style.cursor="default";
-      p.innerHTML='<div class="box on" style="cursor:default"></div><div class="lbl" style="font-weight:700">'+item+'</div>'; f.appendChild(p); });
-    app.appendChild(f);
+    // today's focus (collapsible, open by default)
+    app.appendChild(panel("today-focus","What to focus on now", null, true, function(body){
+      var n=document.createElement("p"); n.className="note"; n.textContent="Key things for "+babys()+" current stage.";
+      body.appendChild(n);
+      g.focus.forEach(function(item){ var p=document.createElement("div"); p.className="check"; p.style.cursor="default";
+        p.innerHTML='<div class="box on" style="cursor:default"></div><div class="lbl" style="font-weight:700">'+item+'</div>'; body.appendChild(p); });
+    }));
 
-    // daily checklist (persisted per day)
-    var cl=document.createElement("div"); cl.className="card";
-    cl.innerHTML='<h2>Daily checklist</h2><p class="note">Resets each day. Tap to tick off.</p>';
+    // daily checklist (collapsible, persisted per day)
     var items=dailyChecklist(days);
     var store=getJSON(K_CHECK,{}); var tkey=todayKey(); var done=store[tkey]||{};
     function isOn(v){ return !!(v && v.on); }
-    items.forEach(function(item,idx){
-      var r=document.createElement("div"); r.className="check"+(isOn(done[idx])?" done":"");
-      var bx=document.createElement("div"); bx.className="box"+(isOn(done[idx])?" on":"");
-      var lb=document.createElement("div"); lb.className="lbl"; lb.textContent=item;
-      r.appendChild(bx); r.appendChild(lb);
-      r.onclick=function(){ done[idx]={on:!isOn(done[idx]),at:Date.now()}; store[tkey]=done; setJSON(K_CHECK,store);
-        r.className="check"+(isOn(done[idx])?" done":""); bx.className="box"+(isOn(done[idx])?" on":"");
-        push(); };
-      cl.appendChild(r);
-    });
-    app.appendChild(cl);
+    var tickedNow=items.filter(function(_,idx){return isOn(done[idx]);}).length;
+    app.appendChild(panel("today-checklist","Daily checklist", tickedNow+"/"+items.length, false, function(body){
+      var n=document.createElement("p"); n.className="note"; n.textContent="Resets each day. Tap to tick off.";
+      body.appendChild(n);
+      items.forEach(function(item,idx){
+        var r=document.createElement("div"); r.className="check"+(isOn(done[idx])?" done":"");
+        var bx=document.createElement("div"); bx.className="box"+(isOn(done[idx])?" on":"");
+        var lb=document.createElement("div"); lb.className="lbl"; lb.textContent=item;
+        r.appendChild(bx); r.appendChild(lb);
+        r.onclick=function(){ done[idx]={on:!isOn(done[idx]),at:Date.now()}; store[tkey]=done; setJSON(K_CHECK,store);
+          r.className="check"+(isOn(done[idx])?" done":""); bx.className="box"+(isOn(done[idx])?" on":"");
+          push(); };
+        body.appendChild(r);
+      });
+    }));
 
     // ---- feeding & sleep guide, inline and collapsed ----
     var gsect=document.createElement("div");
@@ -1324,8 +1336,7 @@
         var del=document.createElement("span"); del.className="del"; del.textContent="remove";
         del.onclick=function(){
           if(!confirm("Remove this measurement?")) return;
-          H.growth=H.growth.filter(function(x){return x.id!==m.id;});
-          saveHealth(H); renderHealth();
+          deleteHealth("growth", m.id); renderHealth();
         };
         r.appendChild(left); r.appendChild(del); gl.appendChild(r);
       });
@@ -1354,8 +1365,7 @@
           '<div class="hsub">'+m.day+' · '+clock(m.t)+'</div>';
         var del=document.createElement("span"); del.className="del"; del.textContent="remove";
         del.onclick=function(){
-          H.temps=H.temps.filter(function(x){return x.id!==m.id;});
-          saveHealth(H); renderHealth();
+          deleteHealth("temps", m.id); renderHealth();
         };
         r.appendChild(left); r.appendChild(del); tl.appendChild(r);
       });
