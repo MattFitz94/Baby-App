@@ -87,7 +87,7 @@
   .btn{border:none;border-radius:12px;padding:12px 18px;font-size:15px;font-weight:800;font-family:inherit;cursor:pointer;}
   .btn-primary{background:var(--amber);color:#fff;box-shadow:0 6px 16px -8px var(--amberDeep);}
   .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--line);}
-  input[type=date],input[type=text]{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:16px;font-family:inherit;color:var(--ink);font-weight:600;}
+  input[type=date],input[type=time],input[type=text]{width:100%;padding:12px;border-radius:12px;border:1px solid var(--line);background:#fff;font-size:16px;font-family:inherit;color:var(--ink);font-weight:600;}
   label{font-size:14px;font-weight:700;display:block;margin-bottom:6px;}
 
   /* sync status */
@@ -381,6 +381,8 @@
         var unsent=(local.events||[]).filter(function(e){
           var r=rmap[e.id];
           if(!r) return true;
+          // a time correction made on this phone since the last push
+          if((e.ed||0) > (r.ed||0)) return true;
           return !!(e.end && !r.end);
         });
         saveState(remote);
@@ -957,7 +959,7 @@
     app.appendChild(c);
 
     var lc=document.createElement("div"); lc.className="card";
-    lc.innerHTML='<h2>Today\'s entries</h2><p class="note">Each row shows how long '+baby()+' had been awake beforehand.</p>';
+    lc.innerHTML='<h2>Today\'s entries</h2><p class="note">Each row shows how long '+baby()+' had been awake beforehand. Tap <b>edit</b> to correct the time on anything you logged late.</p>';
     if(!todayLog.length){ var e0=document.createElement("p"); e0.className="note"; e0.textContent="Nothing logged yet today. Tap a button above to start."; lc.appendChild(e0); }
     else{
       var wrap=document.createElement("div"); wrap.className="log";
@@ -984,11 +986,28 @@
         left.innerHTML='<div>'+main+'</div>'+
           (bits.length?'<div class="hsub"'+(e.type==="note"?' style="white-space:pre-wrap"':'')+'>'+bits.join(" · ")+'</div>':'');
 
+        var acts=document.createElement("div");
+        acts.style.display="flex"; acts.style.gap="6px"; acts.style.flexShrink="0"; acts.style.alignSelf="center";
+
+        var edb=document.createElement("span"); edb.className="del"; edb.textContent="edit";
+        edb.onclick=function(){
+          askEditTime(e,function(nt,ne){
+            e.t=nt;
+            e.day=keyOf(new Date(nt));   // a sleep still belongs to the day it started
+            e.label=clock(nt);
+            if(ne!=null) e.end=ne;
+            e.ed=Date.now();             // marks this as the newer version when syncing
+            setJSON(K_LOG,log); renderTrackers(); push();
+          });
+        };
+
         var del=document.createElement("span"); del.className="del"; del.textContent="remove";
         del.onclick=function(){ var i=log.indexOf(e); if(i>=0){ log.splice(i,1); setJSON(K_LOG,log);
           var d=getJSON(K_DEL,[]); if(e.id){ d.push(e.id); setJSON(K_DEL,d); }
           renderTrackers(); push(); } };
-        r.appendChild(left); r.appendChild(del); wrap.appendChild(r);
+
+        acts.appendChild(edb); acts.appendChild(del);
+        r.appendChild(left); r.appendChild(acts); wrap.appendChild(r);
       });
       lc.appendChild(wrap);
     }
@@ -1023,6 +1042,78 @@
     ov.onclick=function(e){ if(e.target===ov) document.body.removeChild(ov); };
     document.body.appendChild(ov);
     setTimeout(function(){ try{ ta.focus(); }catch(e){} },50);
+  }
+
+  // Correct the time on an entry that was logged late (or early). Native date
+  // and time pickers, so it stays tappable rather than typed. A sleep that has
+  // already ended gets a second pair for the wake time.
+  function askEditTime(e, done){
+    var isSleep = e.type==="sleep";
+    var hasEnd = isSleep && !!e.end;
+
+    function dstr(ms){ return keyOf(new Date(ms)); }
+    function tstr(ms){ var d=new Date(ms); return pad(d.getHours())+":"+pad(d.getMinutes()); }
+    function combine(ds,ts){
+      var dp=String(ds).split("-"), tp=String(ts).split(":");
+      if(dp.length!==3||tp.length<2) return NaN;
+      return new Date(+dp[0],+dp[1]-1,+dp[2],+tp[0],+tp[1],0,0).getTime();
+    }
+
+    var names={feed:"feed",wet:"wet nappy",dirty:"dirty nappy",sleep:"sleep",note:"note"};
+
+    var ov=document.createElement("div"); ov.className="overlay";
+    var card=document.createElement("div"); card.className="overcard";
+    card.innerHTML='<h2>Edit time</h2><p class="note" style="margin:0 0 4px">Change when this '+
+      (names[e.type]||"entry")+' actually happened. Nothing else about it changes.</p>';
+
+    function field(label, ms){
+      var l=document.createElement("label"); l.textContent=label; l.style.marginTop="12px";
+      card.appendChild(l);
+      var row=document.createElement("div"); row.style.display="flex"; row.style.gap="8px";
+      var di=document.createElement("input"); di.type="date"; di.className="dateinput";
+      di.value=dstr(ms); di.max=todayKey();
+      var ti=document.createElement("input"); ti.type="time"; ti.className="dateinput";
+      ti.value=tstr(ms); ti.step="60";
+      row.appendChild(di); row.appendChild(ti);
+      card.appendChild(row);
+      return {d:di,t:ti,was:ms};
+    }
+
+    var startF=field(isSleep?"Went to sleep":"Logged at", e.t);
+    var endF=hasEnd? field("Woke up", e.end) : null;
+
+    var warn=document.createElement("p"); warn.className="note"; warn.style.margin="10px 0 0";
+    warn.textContent="Moving it to an earlier day takes it off today's list — it stays in your History and totals.";
+    card.appendChild(warn);
+
+    var row=document.createElement("div"); row.style.display="flex"; row.style.gap="8px"; row.style.marginTop="14px";
+    var ok=document.createElement("button"); ok.className="btn btn-primary"; ok.style.flex="1"; ok.textContent="Save time";
+    ok.onclick=function(){
+      var nt=combine(startF.d.value||dstr(e.t), startF.t.value||tstr(e.t));
+      if(isNaN(nt)){ alert("That date and time didn't come through — nothing saved."); return; }
+      if(nt>Date.now()+60000){ alert("That's in the future. Pick a time that has already happened."); return; }
+      var ne=null;
+      if(hasEnd){
+        ne=combine(endF.d.value||dstr(e.end), endF.t.value||tstr(e.end));
+        if(isNaN(ne)){ alert("The wake time didn't come through — nothing saved."); return; }
+        if(ne<=nt){ alert("The wake time needs to be after the sleep started."); return; }
+        if(ne>Date.now()+60000){ alert("The wake time is in the future. Pick a time that has already happened."); return; }
+      }
+      if(keyOf(new Date(nt))!==e.day){
+        var moved=new Date(nt).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+        if(!confirm("This moves the entry to "+moved+", so it will drop off today's list. Carry on?")) return;
+      }
+      document.body.removeChild(ov);
+      done(nt,ne);
+    };
+    var no=document.createElement("button"); no.className="btn btn-ghost"; no.textContent="Cancel";
+    no.onclick=function(){ document.body.removeChild(ov); };
+    row.appendChild(ok); row.appendChild(no);
+    card.appendChild(row);
+
+    ov.appendChild(card);
+    ov.onclick=function(ev){ if(ev.target===ov) document.body.removeChild(ov); };
+    document.body.appendChild(ov);
   }
 
   // Tappable amount picker — easier one-handed at 3am than typing a number.
